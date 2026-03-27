@@ -1,7 +1,7 @@
 # Story Pipeline — Remaining Tasks
 
 ## Testing
-- [ ] Add unit tests with mocked LLM responses (patch `subprocess.run` / `stream_llm`)
+- [x] Add unit tests with mocked LLM responses (patch `subprocess.run` / `stream_llm`)
 - [ ] Test each script's error paths: missing files, empty prompts, bad config
 
 ## CLI / Usability
@@ -12,7 +12,7 @@
 - [ ] Auto-retry on LLM failure (common with API timeouts)
 - [ ] Token/cost tracking per session
 - [ ] `--dry-run` flag to preview prompts without calling LLM
-- [x] Configurable word-count target and chapter count (currently hardcoded 8-12 chapters, 20-30k total)
+- [x] Configurable word-count target and chapter count
 
 ## Documentation
 - [ ] Example: show before/after of a full chapter generation
@@ -22,3 +22,4 @@
 - [ ] Import/export project as a single zip
 - [ ] `--watch` mode: auto-regenerate chapter when beats file changes
 - [ ] Language selection in config (currently hardcoded English)
+- [ ] `--model` CLI flag to override config per-call (e.g. `generate_chapter.py 1 --model openrouter/...`)
