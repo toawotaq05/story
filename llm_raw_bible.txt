@@ -1,0 +1,155 @@
+# **The Gentle Care**
+
+## Story Bible — Static Reference Document
+
+> THIS FILE DOES NOT CHANGE after creation. All chapter prompts reference it as-is.
+
+---
+
+### 1. METADATA
+
+- **Title:** The Gentle Care
+- **Genre:** Contemporary Fiction / Heartwarming
+- **Target length:** 20,000 words
+- **Target chapters:** 8 chapters
+- **POV:** Third Person Limited (follows Daniel Harper)
+- **Tense:** Past
+- **Tone:** Gentle, inspiring, with moments of wonder and introspection
+- **Audience:** Adults aged 25-55
+
+---
+
+### 3. SETTING & WORLD
+
+#### Physical World
+The story unfolds in the quiet town of Meadowgrove, nestled between rolling hills and a sparkling river. The Harpers' modest, two-story home is warm and inviting, filled with books, family photos, and the aroma of homemade soup. The local market, with its cobblestone streets and charming shops, is a hub of community activity. The small-town hospital, where Daniel receives care, is modern yet cozy, staffed by dedicated professionals.
+
+#### Social / Cultural Context
+Meadowgrove is a close-knit community where neighbors look out for each other. The town values tradition, family, and kindness. The local market hosts weekly gatherings where residents share news and support one another. There's a strong sense of belonging, but also a quiet acceptance of life's challenges.
+
+#### Rules & Constraints
+- This is a realistic contemporary story with no magical elements.
+- Technology functions as it does in real life.
+- Character growth follows realistic trajectories.
+- The central conflict revolves around illness, love, and healing.
+
+---
+
+### 4. MAIN CHARACTERS
+
+#### Daniel Harper
+- **Role:** Protagonist
+- **Age:** 42
+- **Description:** Daniel is a tall, lean man with short, sandy hair often tousled by his restless hands. His eyes, a deep shade of green, hold a constant glimmer of curiosity and warmth. He dresses comfortably, favoring soft sweaters and well-worn jeans. A small scar on his left cheek, a memento from his youthful adventures, adds character to his face.
+
+- **Voice:** Daniel speaks thoughtfully, often pausing to find the right words. His internal monologue is introspective and sometimes wistful. He opens up about his fears and dreams more easily with his wife, Sarah, but struggles to express himself with others.
+
+- **Goals:** Daniel wants to recover from his illness and reconnect with his passion for writing. Unconsciously, he needs to learn to accept help and vulnerability.
+
+- **Secrets:** Daniel has been secretly working on a novel, something he hasn't shared with anyone, fearing it might not be good enough.
+
+- **Relationships:** Daniel's relationship with Sarah is the cornerstone of his life. He has a close but complicated friendship with his brother, Ethan, and a supportive bond with his doctor, Lisa.
+
+---
+
+### 5. SUPPORTING CHARACTERS
+
+#### Sarah Harper
+- **Role:** Supporting / Love Interest
+- **Age:** 38
+- **Description:** Sarah is a radiant woman with long, auburn hair usually tied in a loose knot. Her blue eyes shine with kindness and determination. She is often seen in simple, comfortable dresses, reflecting her nurturing nature.
+
+- **Voice:** Sarah speaks softly but firmly. She is a good listener and expresses herself clearly, balancing empathy with pragmatism.
+
+- **Goals:** Sarah wants to help Daniel recover and find joy in life again. She secretly hopes to start a family, though she knows Daniel isn't ready to discuss it.
+
+- **Secrets:** Sarah has been researching alternative therapies for Daniel's condition, fearing that the conventional treatments might not be enough.
+
+- **Relationships:** Sarah's love for Daniel is unwavering. She is close with her sister, Emily, who often helps with household tasks.
+
+#### Dr. Lisa Bennett
+- **Role:** Mentor / Supporting
+- **Age:** 45
+- **Description:** Dr. Lisa is a composed woman with short, dark hair and piercing brown eyes. She dresses professionally in tailored suits, exuding competence and calm.
+
+- **Voice:** Dr. Lisa speaks with clarity and authority. She listens attentively to her patients and communicates with empathy and precision.
+
+- **Goals:** Dr. Lisa wants to help Daniel manage his illness and improve his quality of life. She is driven by a desire to provide the best care possible.
+
+- **Secrets:** Dr. Lisa has been dealing with burnout and considering a career change, a secret she keeps from her colleagues and patients.
+
+---
+
+### 6. PROTAGONIST BACKSTORY
+
+Daniel Harper grew up in Meadowgrove, surrounded by love and books. As a child, he was drawn to stories of adventure and heroism. His father, a teacher, encouraged his love for reading, while his mother, a nurse, taught him compassion. Daniel's youth was marked by exploration and curiosity, leading to a few scrapes, including the scar on his cheek from a childhood bike accident. He pursued a degree in literature, hoping to become a writer. However, after a series of rejections, he took a stable job at the local library. There, he met Sarah, his kind and supportive wife, who stood by him as his health began to decline.
+
+---
+
+### 7. ANTAGONIST / CENTRAL CONFLICT
+
+Daniel's illness, a rare autoimmune condition, is the central conflict. It affects his daily life, leaving him weak and often bedridden. The illness threatens his independence, his dreams of writing, and his sense of self-worth. Daniel struggles to accept help, feeling like a burden to Sarah. His journey involves learning to lean on others, particularly Sarah, and finding new strength and purpose despite his health challenges.
+
+---
+
+### 8. THEMES
+
+- The healing power of love and support
+- Finding purpose and passion in the face of adversity
+- The importance of community and connection
+- Embracing vulnerability and acceptance
+- The transformative power of storytelling
+
+---
+
+### 9. TONE & VOICE GUIDELINES
+
+#### Writing Style
+The prose should be evocative yet straightforward, allowing the characters' emotions and the setting's charm to shine through. Use sensory details to immerse the reader in Daniel's world. Metaphors should be grounded and relatable, reflecting the story's themes. The narration should reflect Daniel's introspection, offering glimpses into his thoughts and feelings.
+
+#### Tone
+The overall tone is warm and hopeful, with moments of tenderness and introspection. There are challenges and setbacks, but the focus remains on love, resilience, and personal growth. The tone balances realism with a gentle optimism.
+
+#### What to Avoid
+- Overly sentimental or saccharine moments
+- Quick fixes or easy solutions to Daniel's health issues
+- One-dimensional characters or relationships
+
+#### What to Emphasize
+- The authenticity of Daniel and Sarah's relationship
+- The rich, sensory details of Meadowgrove and the Harpers' home
+- The quiet moments of connection and introspection
+- The complexity of living with a chronic illness
+
+---
+
+### 10. STRUCTURE OVERVIEW
+
+**Act 1 (Chapters 1-2):** The Status Quo
+Daniel's illness is diagnosed, and Sarah steps in to care for him. Daniel struggles with his new limitations and Sarah's constant presence.
+
+**Act 2 (Chapters 3-6):** The Struggle
+Daniel grapples with his illness, trying experimental treatments and rediscovering his love for writing. Sarah faces her own challenges as a caregiver. Daniel's brother, Ethan, visits, bringing old tensions to the surface.
+
+**Act 3 (Chapters 7-8):** The Resolution
+Daniel confronts his fears and learns to accept help. He finds new purpose in his writing and his relationship with Sarah deepens. Daniel and Sarah discover a balance between independence and support, finding hope and strength in their journey together.
+
+---
+
+### 11. TIMELINE
+
+| Event | Description |
+|-------|-------------|
+| 1990 | Daniel is born in Meadowgrove |
+| 2008 | Daniel graduates with a literature degree |
+| 2015 | Daniel starts working at the library, meets Sarah |
+| 2017 | Daniel and Sarah get married |
+| 2022 | Daniel is diagnosed with an autoimmune condition |
+| 2023 | The story begins as Daniel struggles with his illness |
+| 2023 | The story ends with Daniel finding new purpose and strength |
+
+---
+
+### 12. KNOWN ENDING DIRECTION
+
+The story concludes with Daniel finding a new rhythm in his life. He completes a draft of his novel, drawing from his experiences with illness and healing. Sarah, now more confident in her role as a caregiver, supports Daniel's writing and personal growth. The couple finds a deeper connection, understanding that love and support are reciprocal. The story ends with hope, as Daniel and Sarah look towards the future, ready to face whatever comes next together. The final image is of Daniel writing by the window, Sarah reading beside him, the warmth of their home enveloping them both.
