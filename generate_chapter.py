@@ -3,7 +3,7 @@
 generate_chapter.py — Generate a chapter using the story pipeline with streaming output.
 """
 import subprocess, sys, os, threading
-from config import get_model
+from config import get_model, get_word_count_target
 
 def stream_llm(prompt, model=None, system=""):
     if model is None:
@@ -84,6 +84,10 @@ _This document grows as chapters are completed. Each summarized chapter appends 
         chapter_beats_text = f.read()
     with open(system_prompt_file) as f:
         system_prompt_text = f.read().strip()
+
+    # Inject dynamic values from config
+    target = get_word_count_target()
+    system_prompt_text = system_prompt_text.replace("[WORD_COUNT_TARGET]", f"{target:,}")
 
     context = f"{story_bible_text}\n\n{cumulative_text}\n\n{chapter_beats_text}"
 

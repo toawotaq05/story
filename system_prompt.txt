@@ -4,7 +4,7 @@ Follow the story bible and chapter beats below precisely. Write the chapter in a
 
 RULES:
 - Write in [PAST_TENSE/PRESENT_TENSE], [FIRST_PERSON/THIRD_PERSON] POV as specified in the story bible
-- Aim for approximately 2,000–3,000 words per chapter
+- Aim for approximately [WORD_COUNT_TARGET] words per chapter
 - Begin the chapter immediately — no title cards, no "Chapter X" headers, no summaries before diving in
 - End each scene with natural paragraph flow — do NOT use section markers like *** or --- unless they appear in the chapter beats
 - Stay consistent with all character voices, world rules, and facts in the story bible
