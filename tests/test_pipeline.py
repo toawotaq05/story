@@ -141,6 +141,47 @@ class TestCLISmoke(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         self.assertIn("plan_chapters", r.stdout)
 
+    def test_generate_chapter_shows_help(self):
+        r = subprocess.run(
+            ["python3", "generate_chapter.py", "--help"],
+            capture_output=True, text=True,
+            cwd=self.root
+        )
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("--all", r.stdout)
+
+    def test_generate_chapter_all_with_no_beats_exits_cleanly(self):
+        """With no beats files, --all should print a helpful message and exit."""
+        # Temporarily rename chapters dir so no beats are found
+        chapters_dir = os.path.join(self.root, "chapters")
+        backup = chapters_dir + ".bak"
+        shutil.move(chapters_dir, backup)
+        try:
+            r = subprocess.run(
+                ["python3", "generate_chapter.py", "--all"],
+                capture_output=True, text=True,
+                cwd=self.root
+            )
+            self.assertTrue(
+                "no chapter beats found" in r.stdout.lower()
+                or "no chapter beats found" in r.stderr.lower()
+            )
+        finally:
+            shutil.move(backup, chapters_dir)
+
+    def test_compile_dry_run(self):
+        r = subprocess.run(
+            ["python3", "compile.py", "--dry-run"],
+            capture_output=True, text=True,
+            cwd=self.root
+        )
+        # Should either find drafts or say none found
+        self.assertTrue(
+            "no chapter drafts found" in r.stdout.lower()
+            or "would write" in r.stdout.lower()
+            or r.returncode == 0
+        )
+
 
 # -------------------------------------------------------------------
 # Mocked LLM tests — patch subprocess at the right level

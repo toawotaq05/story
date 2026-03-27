@@ -7,6 +7,8 @@
 ## CLI / Usability
 - [ ] `--force` flag on `summarize_chapter.py` to regenerate next beats even if file exists
 - [ ] `story.py` unified CLI with subcommands (`build`, `write`, `next`, `status`)
+- [x] `generate_chapter.py --all` to generate all chapters in sequence
+- [x] `compile.py` to assemble drafts into a single .md ebook
 
 ## Quality-of-Life
 - [ ] Auto-retry on LLM failure (common with API timeouts)

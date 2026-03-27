@@ -70,6 +70,7 @@ python3 status.py
 | `generate_chapter.py` | Write a chapter draft (streaming output) |
 | `summarize_chapter.py` | Summarize chapter, update history, auto-generate next beats |
 | `status.py` | Show chapter progress, word counts, story title |
+| `compile.py` | Assemble all chapter drafts into a single .md ebook |
 | `config.py` | Shared config reader — all scripts import from here |
 
 ---
@@ -119,6 +120,29 @@ python3 plan_chapters.py --regen-beats          # regenerate all beats from curr
 3. **chapters/chapter_N_beats.md** — what happens in this chapter. Edit before generating.
 
 ---
+
+### Generate All (lazy mode)
+
+```sh
+python3 generate_chapter.py --all
+```
+
+Finds all `chapter_N_beats.md` files, skips chapters that already have a draft (safe to re-run), streams each chapter in sequence. No manual tracking needed.
+
+```sh
+python3 generate_chapter.py --all --no-skip   # overwrite existing drafts
+python3 generate_chapter.py 1 custom_path.txt  # single chapter to custom path
+```
+
+### Assemble into a Book
+
+```sh
+python3 compile.py --dry-run        # preview to stdout
+python3 compile.py                   # writes book.md
+python3 compile.py --output full.md  # custom output path
+```
+
+`compile.py` extracts chapter titles from the outline, adds word-count annotations per chapter, and produces a clean `.md` file ready for pandoc or similar.
 
 ## Tips
 

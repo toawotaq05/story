@@ -1,8 +1,11 @@
 # Debug / generated output
 llm_raw_output.txt
+__pycache__/
 
-# Generated story content — user-specific
-chapters/
+# Generated story content — project-specific (keep beats; generated drafts live alongside them)
+story_bible.md
+cumulative_summary.md
+book.md
 
 # OS / editor
 .DS_Store
