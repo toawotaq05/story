@@ -121,13 +121,26 @@ python3 plan_chapters.py --regen-beats          # regenerate all beats from curr
 
 ---
 
-### Generate All (lazy mode)
+### Generate All (lazy mode) — ENHANCED
 
 ```sh
 python3 generate_chapter.py --all
 ```
 
-Finds all `chapter_N_beats.md` files, skips chapters that already have a draft (safe to re-run), streams each chapter in sequence. No manual tracking needed.
+**NEW BEHAVIOR:** The `--all` flag now mimics the manual workflow by automatically summarizing each chapter and updating `cumulative_summary.md`. This single command provides a complete, self-contained workflow:
+
+1. **Generates all chapter drafts** from `chapter_N_beats.md` files
+2. **Automatically updates** `cumulative_summary.md` with chapter summaries
+3. **Tracks completed chapters** and generates next chapter beats as needed
+4. **Streams output live** to the terminal for real-time visibility
+
+When you run `--all`, it performs the following steps:
+- Processes all chapters from 1 to N (where N is defined in your beats files)
+- Calls summarization logic after generating each chapter draft
+- Updates the cumulative story history with key plot points, character status, and open threads
+- Generates beats for the next chapter if they don't already exist
+
+This eliminates the need for a separate `summarize_chapter.py` call when using `--all`, making it a true "one-command" solution for complete book generation.
 
 ```sh
 python3 generate_chapter.py --all --no-skip   # overwrite existing drafts

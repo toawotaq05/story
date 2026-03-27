@@ -10,37 +10,15 @@ Usage:
   python3 plan_chapters.py --regen-outline       # regenerate outline only
   python3 plan_chapters.py --regen-beats        # regenerate all beats from existing outline
 """
-import subprocess, sys, os, argparse, threading, re
+import sys
+import os
+import argparse
+import re
+
+from dual_llm import stream_llm
 from config import get_model, get_default_chapters
 
 DEFAULT_CHAPTERS = get_default_chapters()
-
-def stream_llm(prompt, model=None, system="You are a story architect."):
-    if model is None:
-        model = get_model("outline")
-    proc = subprocess.Popen(
-        ["llm", "-m", model, "-s", system, "--stream"],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, bufsize=0,
-    )
-    output = []
-    def pump():
-        try:
-            for char in iter(lambda: proc.stdout.read(1), ''):
-                if char:
-                    sys.stdout.write(char)
-                    sys.stdout.flush()
-                    output.append(char)
-        except Exception:
-            pass
-    t = threading.Thread(target=pump)
-    t.start()
-    proc.communicate(input=prompt.encode())
-    proc.wait()
-    t.join(timeout=2)
-    if proc.returncode != 0:
-        raise RuntimeError(f"LLM failed: {proc.stderr.read()}")
-    return ''.join(output)
 
 def main():
     parser = argparse.ArgumentParser(description="Plan the full chapter outline before writing.")
@@ -145,7 +123,7 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
 
         print("Streaming outline:")
         print("-" * 40)
-        outline_output = stream_llm(outline_prompt)
+        outline_output = stream_llm(outline_prompt, model="outline")
         print("-" * 40)
         print()
 
@@ -214,30 +192,36 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
         print(f"=== Generating Beats for {len(chapter_entries)} Chapters ===")
         print()
 
-        # Load beats template from chapter 1 if it exists, else generate from scratch
+        # Load beats template from chapter 1 if it exists AND has actual content
         template_path = os.path.join(chapters_dir, "chapter_1_beats.md")
-        if os.path.exists(template_path):
+        if os.path.exists(template_path) and os.path.getsize(template_path) > 50:
             with open(template_path) as f:
                 beats_template = f.read()
         else:
-            # Try from story_bible or use a minimal template
             beats_template = None
 
         for ch_num, ch_title, ch_summary in chapter_entries:
             beats_file = os.path.join(chapters_dir, f"chapter_{ch_num}_beats.md")
-            if os.path.exists(beats_file) and not args.regen_beats:
+            # Enhanced: Regenerate all beats when --beats is used (not just when --regen-beats is set)
+            # This ensures --beats alone can "generate all chapter beats upfront" as documented
+            skip_chapter = (
+                os.path.exists(beats_file) 
+                and not args.regen_beats 
+                and not args.beats
+            )
+            if skip_chapter:
                 print(f"  Skipping Chapter {ch_num} (already exists)")
                 continue
 
             print(f"  Generating Chapter {ch_num} — {ch_title}")
 
-            # Build context: what came before
+            # Build context: what came before (skip empty beats files)
             prior_beats = []
             for prev_num, prev_title, prev_summary in chapter_entries:
                 if int(prev_num) >= int(ch_num):
                     break
                 prev_file = os.path.join(chapters_dir, f"chapter_{prev_num}_beats.md")
-                if os.path.exists(prev_file):
+                if os.path.exists(prev_file) and os.path.getsize(prev_file) > 50:
                     with open(prev_file) as f:
                         prior_beats.append(f"# Chapter {prev_num} — {prev_title}\n{f.read()}")
 
@@ -265,6 +249,13 @@ INSTRUCTIONS:
 
             beats_content = stream_llm(user_prompt, model=get_model("beats"), system=system_prompt)
             print()
+
+            # Validate: beats should start with "# Chapter", not the story bible or garbage
+            if not beats_content.strip().startswith("# Chapter"):
+                print(f"  ⚠ WARNING: Generated beats for Chapter {ch_num} look wrong (starts with: {beats_content.strip()[:80]!r})")
+                print(f"  ⚠ NOT writing chapter_{ch_num}_beats.md — run with --regen-beats to retry")
+                print(f"  ⚠ If this persists, check if local LLM context window is too small")
+                continue
 
             with open(beats_file, "w") as f:
                 f.write(beats_content)

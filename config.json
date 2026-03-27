@@ -1,13 +1,16 @@
 {
     "models": {
-        "story_bible": "openrouter/thedrummer/cydonia-24b-v4.1",
-        "outline":     "openrouter/thedrummer/cydonia-24b-v4.1",
-        "beats":       "openrouter/thedrummer/cydonia-24b-v4.1",
+        "story_bible": "openrouter/qwen/qwen3-235b-a22b",
+        "outline":     "openrouter/qwen/qwen3-235b-a22b",
+        "beats":       "openrouter/qwen/qwen3-235b-a22b",
         "write":       "openrouter/thedrummer/cydonia-24b-v4.1",
-        "summarize":   "openrouter/thedrummer/cydonia-24b-v4.1"
+        "summarize":   "openrouter/qwen/qwen3-235b-a22b"
     },
     "story": {
-        "default_chapters": 10,
-        "word_count_target": 25000
-    }
+        "default_chapters": 8,
+        "word_count_target": 20000
+    },
+    "local_mode": true,
+    "local_endpoint": "http://localhost:8080",
+    "local_model": "gemma3-27b-vl-polaris"
 }

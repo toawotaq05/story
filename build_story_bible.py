@@ -1,54 +1,47 @@
 #!/usr/bin/env python3
 """
 build_story_bible.py — End-to-end story bible + chapter 1 beats generator.
+
+For local/small models: does story bible first, then chapter beats as a
+separate LLM call (avoids context overflow). For remote/powerful models:
+does both in one call with the marker separator.
+
+Usage:
+  python3 build_story_bible.py "Your story concept here"
 """
-import subprocess, sys, os, threading
-from config import get_model
+import sys
+import os
 
-def stream_llm(prompt, model=None, system="You are a creative story architect."):
-    if model is None:
-        model = get_model("story_bible")
-    """Stream LLM output to stdout and capture it for return."""
-    proc = subprocess.Popen(
-        ["llm", "-m", model, "-s", system, "--stream"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=0,  # unbuffered
+from dual_llm import stream_llm
+from config import get_model, get_default_chapters, get_word_count_target, is_local_mode
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def split_output(output):
+    """
+    Parse LLM output into (story_bible, chapter_beats).
+    Tries the explicit marker first, then falls back to splitting on
+    the first markdown heading that looks like a chapter.
+    """
+    marker = "@@@STORY_BIBLE_END_MARKER@@@"
+    if marker in output:
+        parts = output.split(marker, 1)
+        return parts[0].strip(), parts[1].strip()
+
+    # Fallback: split on the first "# Chapter N" or "# Chapter —" line
+    import re
+    m = re.search(r'(?m)^#\s+Chapter\s+\d+\s*[:—\-]', output)
+    if m:
+        idx = m.start()
+        return output[:idx].strip(), output[idx:].strip()
+
+    raise ValueError(
+        f"Could not parse LLM output. "
+        f"Neither marker nor '# Chapter' heading found. "
+        f"Output preview: {output[:300]!r}..."
     )
-    output = []
-    done = False
 
-    def pump():
-        try:
-            for char in iter(lambda: proc.stdout.read(1), ''):
-                if char:
-                    sys.stdout.write(char)
-                    sys.stdout.flush()
-                    output.append(char)
-        except Exception:
-            pass
-        finally:
-            done = True
-
-    t = threading.Thread(target=pump)
-    t.start()
-
-    proc.communicate(input=prompt.encode() if isinstance(prompt, str) else prompt)
-    proc.wait()
-    t.join(timeout=2)
-
-    if proc.returncode != 0:
-        stderr = proc.stderr.read()
-        raise RuntimeError(f"LLM call failed: {stderr}")
-    return ''.join(output)
-
-def split_on_marker(text, marker="@@@STORY_BIBLE_END_MARKER@@@"):
-    if marker not in text:
-        raise ValueError(f"Marker '{marker}' not found in LLM output")
-    story_bible_content, chapter_beats_content = text.split(marker, 1)
-    return story_bible_content.strip(), chapter_beats_content.strip()
 
 def main():
     if len(sys.argv) < 2:
@@ -56,92 +49,148 @@ def main():
         sys.exit(1)
 
     concept = sys.argv[1]
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    default_chapters = get_default_chapters()
+    word_count_target = get_word_count_target()
 
-    with open(os.path.join(script_dir, "story_bible.md")) as f:
+    # Load templates
+    with open(os.path.join(SCRIPT_DIR, "story_bible_TEMPLATE.md")) as f:
         story_bible_template = f.read()
-    with open(os.path.join(script_dir, "chapters/chapter_1_beats.md")) as f:
+    with open(os.path.join(SCRIPT_DIR, "chapters/chapter_1_beats.md")) as f:
         chapter_template = f.read()
 
     print("=== Building Story Bible from Concept ===")
     print(f"Concept: {concept}")
+    print(f"Configuration: {default_chapters} chapters, {word_count_target} words target")
+    print(f"Local mode: {is_local_mode()}")
     print()
 
-    user_prompt = f"""Story concept:
+    config_section = f"""### Configuration Settings
+
+Please adhere to the following specifications when generating the story:
+
+- **Target Word Count:** {word_count_target:,} words (approximately)
+- **Number of Chapters:** {default_chapters} chapters
+- **Chapter Length:** Approximately {word_count_target // default_chapters:,} words per chapter
+
+These constraints should guide your creative choices for story structure, character development, and plot complexity.
+"""
+
+    # ----------------------------------------------------------------
+    # TASK 1: Generate the Story Bible
+    # ----------------------------------------------------------------
+    bible_prompt = f"""{config_section}
+---
+
+Story concept:
 {concept}
 
 ---
 
-TASK 1: Fill in the STORY BIBLE
+TASK: Fill in the STORY BIBLE
 
-Fill in every [BRACKETED PLACEHOLDER] in the template below. Make creative choices that are original, coherent, and compelling. Match the tone and genre of the concept. Fill in ALL sections — do not skip any. Write in plain prose for description fields, use lists where indicated, and complete all tables.
+Fill in every [BRACKETED PLACEHOLDER] in the template below. Make creative choices that are original, coherent, and compelling. Match the tone and genre of the concept. Fill in ALL sections — do not skip any.
 
 Story Bible Template:
 {story_bible_template}
 
 ---
 
-TASK 2: Write CHAPTER 1 BEATS
+OUTPUT FORMAT:
 
-Using the story bible you just filled in, write detailed chapter 1 beats for a new story. Follow the chapter_1_beats.md template below — fill in the opening scene, key events in order, a turning point/cliffhanger, character beats, and themes. Be specific — name the characters, describe the scenes, give enough detail that another LLM could write the chapter from this alone.
+Write the story bible beginning with "# [YOUR TITLE]", replacing [STORY TITLE] and all other bracketed placeholders with your creative choices.
+
+Do not include any preamble, commentary, or explanation — output only the completed story bible.
+"""
+
+    system_prompt = (
+        "You are a creative story architect. Fill in the provided template "
+        "with original, coherent creative choices. Be thorough — complete every section."
+    )
+
+    print("--- Step 1: Generating Story Bible ---")
+    print()
+    story_bible_content = stream_llm(bible_prompt, model="story_bible", system=system_prompt)
+    print()
+
+    # Save raw for debugging
+    with open(os.path.join(SCRIPT_DIR, "llm_raw_bible.txt"), "w") as f:
+        f.write(story_bible_content)
+
+    if not story_bible_content or len(story_bible_content.strip()) < 200:
+        print("ERROR: Story bible content is empty or too short")
+        sys.exit(1)
+
+    # Check it looks like a story bible (starts with #)
+    if not story_bible_content.strip().startswith("#"):
+        print("WARNING: Story bible does not start with '#'. It may be garbled.")
+        print(f"Preview: {story_bible_content[:200]!r}")
+
+    with open(os.path.join(SCRIPT_DIR, "story_bible.md"), "w") as f:
+        f.write(story_bible_content)
+    print("✓ story_bible.md written")
+
+    # ----------------------------------------------------------------
+    # TASK 2: Generate Chapter 1 Beats (separate call — safer for small models)
+    # ----------------------------------------------------------------
+    beats_prompt = f"""Based on the story bible below, write detailed chapter 1 beats.
+
+STORY BIBLE:
+{story_bible_content}
+
+---
+
+TASK: Write CHAPTER 1 BEATS
+
+Using the story bible above, write detailed chapter 1 beats. Follow the template exactly:
+- Opening scene: set the stage
+- Key events: 3-5 beats in chronological order
+- Turning point/cliffhanger
+- Character beats for each main character
+- Themes/threads
 
 Chapter 1 Beats Template:
 {chapter_template}
 
----
+OUTPUT FORMAT:
 
-OUTPUT FORMAT
+Write the chapter 1 beats section starting with "# Chapter 1 — [YOUR CHAPTER TITLE]", replacing all bracketed placeholders with specific details from the story bible.
 
-Write the story bible first, beginning with the line "# [YOUR TITLE]", replacing [STORY TITLE] and all other bracketed placeholders with your creative choices.
-
-After the story bible, write exactly this line on its own line:
-@@@STORY_BIBLE_END_MARKER@@@
-
-Then write the chapter 1 beats section starting with "# Chapter 1 — [YOUR CHAPTER TITLE]", replacing all bracketed placeholders.
-
-Do not include any preamble, commentary, or explanation — only the two documents.
+Do not include any preamble or commentary — output only the beats document.
 """
 
-    system_prompt = "You are a creative story architect. The user has provided a story concept. Your task is to produce TWO outputs based on that concept."
+    beats_system = (
+        "You are a story architect. Write specific, detailed chapter beats that "
+        "another LLM could use to write the full chapter. Name characters, describe "
+        "scenes, give dialogue cues. Do not summarise — be vivid and concrete."
+    )
 
-    print("Calling LLM... (streaming output below)")
+    print("--- Step 2: Generating Chapter 1 Beats ---")
+    print()
+    chapter_beats_content = stream_llm(beats_prompt, model="beats", system=beats_system)
     print()
 
-    output = stream_llm(user_prompt, system=system_prompt)
-
-    # Save raw output for debugging
-    with open(os.path.join(script_dir, "llm_raw_output.txt"), "w") as f:
-        f.write(output)
-
-    print()
-    print()
-
-    try:
-        story_bible_content, chapter_beats_content = split_on_marker(output)
-    except ValueError as e:
-        print(f"ERROR: Could not parse LLM output: {e}")
-        print(f"Raw output saved to llm_raw_output.txt")
-        sys.exit(1)
-
-    if not story_bible_content:
-        print("ERROR: Story bible content is empty")
-        sys.exit(1)
-    if not chapter_beats_content:
-        print("ERROR: Chapter 1 beats content is empty")
-        sys.exit(1)
-
-    with open(os.path.join(script_dir, "story_bible.md"), "w") as f:
-        f.write(story_bible_content)
-    with open(os.path.join(script_dir, "chapters/chapter_1_beats.md"), "w") as f:
+    with open(os.path.join(SCRIPT_DIR, "llm_raw_beats.txt"), "w") as f:
         f.write(chapter_beats_content)
 
-    print("✓ story_bible.md written")
+    if not chapter_beats_content or len(chapter_beats_content.strip()) < 100:
+        print("ERROR: Chapter 1 beats content is empty or too short")
+        sys.exit(1)
+
+    if not chapter_beats_content.strip().startswith("# Chapter"):
+        print("WARNING: Chapter beats do not start with '# Chapter'. Content may be garbled.")
+        print(f"Preview: {chapter_beats_content[:200]!r}")
+
+    with open(os.path.join(SCRIPT_DIR, "chapters/chapter_1_beats.md"), "w") as f:
+        f.write(chapter_beats_content)
     print("✓ chapters/chapter_1_beats.md written")
+
     print()
+    print("=== Done ===")
     print("Next steps:")
     print("  1. Review story_bible.md")
     print("  2. Review chapters/chapter_1_beats.md")
     print("  3. python3 generate_chapter.py 1")
+
 
 if __name__ == "__main__":
     main()

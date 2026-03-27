@@ -3,54 +3,29 @@
 summarize_chapter.py — Summarize a completed chapter, update cumulative_summary.md,
 and generate the next chapter's beats. Streaming output enabled.
 """
-import subprocess, sys, os, re, threading
-from config import get_model
+import argparse
+import os
+import re
+import sys
 
-def stream_llm(prompt, model=None,
-               system="You are a story analyst."):
-    if model is None:
-        model = get_model("summarize")
-    """Stream LLM output to stdout and capture it for return."""
-    proc = subprocess.Popen(
-        ["llm", "-m", model, "-s", system, "--stream"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=0,
-    )
-    output = []
+from dual_llm import stream_llm
 
-    def pump():
-        try:
-            for char in iter(lambda: proc.stdout.read(1), ''):
-                if char:
-                    sys.stdout.write(char)
-                    sys.stdout.flush()
-                    output.append(char)
-        except Exception:
-            pass
-
-    t = threading.Thread(target=pump)
-    t.start()
-    proc.communicate(input=prompt.encode() if isinstance(prompt, str) else prompt)
-    proc.wait()
-    t.join(timeout=2)
-    return ''.join(output)
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python3 summarize_chapter.py <chapter_number>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Summarize a chapter and generate next beats")
+    parser.add_argument("chapter", help="Chapter number to summarize")
+    parser.add_argument("--quiet", action="store_true",
+                        help="Suppress non-essential output (useful when called by generate_chapter.py --all)")
+    args = parser.parse_args()
 
-    chapter = sys.argv[1]
+    script_dir   = os.path.dirname(os.path.abspath(__file__))
+    chapter      = args.chapter
     next_chapter = str(int(chapter) + 1)
-    script_dir = os.path.dirname(os.path.abspath(__file__))
 
     chapter_draft = os.path.join(script_dir, f"chapters/chapter_{chapter}_draft.txt")
-    next_beats = os.path.join(script_dir, f"chapters/chapter_{next_chapter}_beats.md")
-    cumulative = os.path.join(script_dir, "cumulative_summary.md")
-    story_bible = os.path.join(script_dir, "story_bible.md")
+    next_beats    = os.path.join(script_dir, f"chapters/chapter_{next_chapter}_beats.md")
+    cumulative    = os.path.join(script_dir, "cumulative_summary.md")
+    story_bible   = os.path.join(script_dir, "story_bible.md")
 
     if not os.path.exists(chapter_draft):
         print(f"ERROR: Chapter draft not found: {chapter_draft}")
@@ -60,8 +35,7 @@ def main():
     with open(chapter_draft) as f:
         draft_content = f.read()
 
-    print(f"=== Summarizing Chapter {chapter} ===")
-    print()
+    print(f"=== Summarizing Chapter {chapter} ===\n")
 
     system_prompt = (
         "You are a story analyst. Read the chapter draft below and produce a "
@@ -94,18 +68,20 @@ Format your response EXACTLY as follows — do not add any preamble, commentary,
 
     print("Summarizing chapter (streaming):")
     print("-" * 40)
-    summary = stream_llm(user_prompt, system=system_prompt)
+    summary = stream_llm(user_prompt, model="summarize", system=system_prompt)
     print("-" * 40)
     print()
 
     with open(cumulative, "a") as f:
         f.write("\n" + summary)
+
     with open(cumulative) as f:
         content = f.read()
+
     new_content = re.sub(
-        r'(Completed Chapters:\s*)\d+',
-        rf'\g<1>{chapter}',
-        content
+        r"(Completed Chapters:\s*)\d+",
+        rf"\g<1>{chapter}",
+        content,
     )
     with open(cumulative, "w") as f:
         f.write(new_content)
@@ -115,8 +91,7 @@ Format your response EXACTLY as follows — do not add any preamble, commentary,
     # --- Generate next chapter beats ---
     with open(story_bible) as f:
         story_bible_text = f.read()
-    current_beats = os.path.join(script_dir, f"chapters/chapter_{chapter}_beats.md")
-    with open(current_beats) as f:
+    with open(os.path.join(script_dir, f"chapters/chapter_{chapter}_beats.md")) as f:
         beats_format = f.read()
 
     system_prompt2 = "You are a story architect."
@@ -144,7 +119,7 @@ INSTRUCTIONS:
         print()
         print(f"Generating Chapter {next_chapter} beats (streaming):")
         print("-" * 40)
-        next_beats_content = stream_llm(user_prompt2, model=get_model("beats"), system=system_prompt2)
+        next_beats_content = stream_llm(user_prompt2, model="beats", system=system_prompt2)
         print("-" * 40)
         print()
         with open(next_beats, "w") as f:
@@ -162,9 +137,11 @@ INSTRUCTIONS:
     for line in content.split("\n"):
         if line.startswith("### Chapter "):
             print(" ", line)
-    print()
-    print("Next step:")
-    print(f"  python3 generate_chapter.py {next_chapter}")
+    if not args.quiet:
+        print()
+        print("Next step:")
+        print(f"  python3 generate_chapter.py {next_chapter}")
+
 
 if __name__ == "__main__":
     main()
