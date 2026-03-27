@@ -12,6 +12,7 @@
 - [ ] Auto-retry on LLM failure (common with API timeouts)
 - [ ] Token/cost tracking per session
 - [ ] `--dry-run` flag to preview prompts without calling LLM
+- [ ] Configurable word-count target and chapter count (currently hardcoded 8-12 chapters, 20-30k total)
 
 ## Documentation
 - [ ] Example: show before/after of a full chapter generation
