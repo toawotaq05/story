@@ -4,7 +4,8 @@ status.py — Show the current state of the story project.
 
 Usage: python3 status.py
 """
-import os, glob
+import os, glob, re
+from config import get_word_count_target
 
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -101,9 +102,14 @@ def main():
     for d in draft_files:
         with open(d) as f:
             total_wc += len(f.read().split())
+    target = get_word_count_target()
     if total_wc > 0:
+        pct = int(total_wc / target * 100)
         print()
-        print(f"  Total draft words: {total_wc:,}")
+        print(f"  Total draft words: {total_wc:,} / {target:,} ({pct}%)")
+    else:
+        print()
+        print(f"  Total draft words: 0 (target: {target:,})")
     print()
     print("=" * 50)
 

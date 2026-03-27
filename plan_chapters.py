@@ -11,9 +11,9 @@ Usage:
   python3 plan_chapters.py --regen-beats        # regenerate all beats from existing outline
 """
 import subprocess, sys, os, argparse, threading, re
-from config import get_model
+from config import get_model, get_default_chapters
 
-DEFAULT_CHAPTERS = 10
+DEFAULT_CHAPTERS = get_default_chapters()
 
 def stream_llm(prompt, model=None, system="You are a story architect."):
     if model is None:

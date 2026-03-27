@@ -5,5 +5,9 @@
         "beats":       "openrouter/thedrummer/cydonia-24b-v4.1",
         "write":       "openrouter/thedrummer/cydonia-24b-v4.1",
         "summarize":   "openrouter/thedrummer/cydonia-24b-v4.1"
+    },
+    "story": {
+        "default_chapters": 10,
+        "word_count_target": 25000
     }
 }
