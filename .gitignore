@@ -1,0 +1,9 @@
+# Debug / generated output
+llm_raw_output.txt
+
+# Generated story content — user-specific
+chapters/
+
+# OS / editor
+.DS_Store
+*.swp
