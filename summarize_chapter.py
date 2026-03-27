@@ -4,9 +4,12 @@ summarize_chapter.py — Summarize a completed chapter, update cumulative_summar
 and generate the next chapter's beats. Streaming output enabled.
 """
 import subprocess, sys, os, re, threading
+from config import get_model
 
-def stream_llm(prompt, model="openrouter/thedrummer/cydonia-24b-v4.1",
+def stream_llm(prompt, model=None,
                system="You are a story analyst."):
+    if model is None:
+        model = get_model("summarize")
     """Stream LLM output to stdout and capture it for return."""
     proc = subprocess.Popen(
         ["llm", "-m", model, "-s", system, "--stream"],
@@ -141,7 +144,7 @@ INSTRUCTIONS:
         print()
         print(f"Generating Chapter {next_chapter} beats (streaming):")
         print("-" * 40)
-        next_beats_content = stream_llm(user_prompt2, system=system_prompt2)
+        next_beats_content = stream_llm(user_prompt2, model=get_model("beats"), system=system_prompt2)
         print("-" * 40)
         print()
         with open(next_beats, "w") as f:

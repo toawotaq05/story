@@ -1,0 +1,9 @@
+{
+    "models": {
+        "story_bible": "openrouter/thedrummer/cydonia-24b-v4.1",
+        "outline":     "openrouter/thedrummer/cydonia-24b-v4.1",
+        "beats":       "openrouter/thedrummer/cydonia-24b-v4.1",
+        "write":       "openrouter/thedrummer/cydonia-24b-v4.1",
+        "summarize":   "openrouter/thedrummer/cydonia-24b-v4.1"
+    }
+}

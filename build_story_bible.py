@@ -3,9 +3,11 @@
 build_story_bible.py — End-to-end story bible + chapter 1 beats generator.
 """
 import subprocess, sys, os, threading
+from config import get_model
 
-def stream_llm(prompt, model="openrouter/thedrummer/cydonia-24b-v4.1",
-               system="You are a creative story architect."):
+def stream_llm(prompt, model=None, system="You are a creative story architect."):
+    if model is None:
+        model = get_model("story_bible")
     """Stream LLM output to stdout and capture it for return."""
     proc = subprocess.Popen(
         ["llm", "-m", model, "-s", system, "--stream"],

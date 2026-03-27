@@ -10,11 +10,14 @@ Usage:
   python3 plan_chapters.py --regen-outline       # regenerate outline only
   python3 plan_chapters.py --regen-beats        # regenerate all beats from existing outline
 """
-import subprocess, sys, os, argparse, threading
+import subprocess, sys, os, argparse, threading, re
+from config import get_model
 
 DEFAULT_CHAPTERS = 10
 
-def stream_llm(prompt, model="openrouter/thedrummer/cydonia-24b-v4.1", system="You are a story architect."):
+def stream_llm(prompt, model=None, system="You are a story architect."):
+    if model is None:
+        model = get_model("outline")
     proc = subprocess.Popen(
         ["llm", "-m", model, "-s", system, "--stream"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -260,7 +263,7 @@ INSTRUCTIONS:
 - Plant threads that pay off in later chapters
 - Do not include any preamble or commentary — output only the beats document"""
 
-            beats_content = stream_llm(user_prompt, system=system_prompt)
+            beats_content = stream_llm(user_prompt, model=get_model("beats"), system=system_prompt)
             print()
 
             with open(beats_file, "w") as f:

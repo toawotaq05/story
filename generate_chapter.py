@@ -3,8 +3,11 @@
 generate_chapter.py — Generate a chapter using the story pipeline with streaming output.
 """
 import subprocess, sys, os, threading
+from config import get_model
 
-def stream_llm(prompt, model="openrouter/thedrummer/cydonia-24b-v4.1", system=""):
+def stream_llm(prompt, model=None, system=""):
+    if model is None:
+        model = get_model("write")
     """Stream LLM output to stdout and capture it for return."""
     proc = subprocess.Popen(
         ["llm", "-m", model, "-s", system, "--stream"],
