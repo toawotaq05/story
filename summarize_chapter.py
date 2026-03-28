@@ -96,7 +96,7 @@ Format your response EXACTLY as follows — do not add any preamble, commentary,
         content = f.read()
 
     new_content = re.sub(
-        r"(Completed Chapters:\s*)\d+",
+        r"(\*{0,2}Completed Chapters:\*{0,2}\s*)\d+",
         rf"\g<1>{chapter}",
         content,
     )
@@ -106,7 +106,7 @@ Format your response EXACTLY as follows — do not add any preamble, commentary,
     # Verify the update stuck
     with open(cumulative) as f:
         verify = f.read()
-    if f"Completed Chapters: {chapter}" not in verify:
+    if re.search(rf"Completed Chapters:\*{{0,2}}\s*{chapter}(?!\d)", verify) is None:
         print(f"WARNING: cumulative_summary.md may not have updated correctly", file=sys.stderr)
     else:
         print(f"✓ Chapter {chapter} summarized — cumulative_summary.md updated (Completed Chapters: {chapter})")

@@ -26,7 +26,7 @@ def init_cumulative(script_dir):
         with open(path, "w") as f:
             f.write(
                 "# Story So Far\n\n"
-                "Completed Chapters: 0\n\n"
+                "**Completed Chapters:** 0\n\n"
                 "---\n\n"
                 "_This document grows as chapters are completed. Each summarized chapter appends here._\n\n"
             )

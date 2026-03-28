@@ -126,6 +126,17 @@ Do not include any preamble, commentary, or explanation — output only the comp
         f.write(story_bible_content)
     print("✓ story_bible.md written")
 
+    # Initialize cumulative_summary.md if it doesn't exist
+    cumulative = os.path.join(SCRIPT_DIR, "cumulative_summary.md")
+    if not os.path.exists(cumulative):
+        with open(cumulative, "w") as f:
+            f.write("# Cumulative Story Summary\n\n")
+            f.write(f"## Overview\n\n")
+            f.write(f"- Total chapters: {default_chapters}\n")
+            f.write(f"- Target word count: {word_count_target:,}\n")
+            f.write(f"- **Completed Chapters:** 0\n")
+        print("✓ cumulative_summary.md initialized")
+
     # ----------------------------------------------------------------
     # TASK 2: Generate Chapter 1 Beats (separate call — safer for small models)
     # ----------------------------------------------------------------

@@ -95,9 +95,6 @@ def _stream_local(prompt, model=None, system="", silent=False):
                 output.append(content)
             elif reason:
                 reasoning.append(reason)
-                if not silent:
-                    sys.stderr.write(f"[thinking: {len(reason)} chars]\n")
-                    sys.stderr.flush()
         except Exception:
             continue
 
