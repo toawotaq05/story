@@ -9,6 +9,7 @@ import re
 import sys
 
 from dual_llm import stream_llm
+from config import get_default_chapters
 
 
 def main():
@@ -36,6 +37,13 @@ def main():
         draft_content = f.read()
 
     print(f"=== Summarizing Chapter {chapter} ===\n")
+
+    # Read cumulative to check current state
+    if os.path.exists(cumulative):
+        with open(cumulative) as f:
+            existing_cum = f.read()
+    else:
+        existing_cum = ""
 
     system_prompt = (
         "You are a story analyst. Read the chapter draft below and produce a "
@@ -68,9 +76,18 @@ Format your response EXACTLY as follows — do not add any preamble, commentary,
 
     print("Summarizing chapter (streaming):")
     print("-" * 40)
-    summary = stream_llm(user_prompt, model="summarize", system=system_prompt)
+    try:
+        summary = stream_llm(user_prompt, model="summarize", system=system_prompt)
+    except Exception as e:
+        print(f"\nERROR: LLM call failed during summarization: {e}", file=sys.stderr)
+        sys.exit(1)
     print("-" * 40)
     print()
+
+    if not summary or len(summary.strip()) < 50:
+        print(f"ERROR: Summary is empty or too short ({len(summary.strip()) if summary else 0} chars)", file=sys.stderr)
+        print("The LLM may have returned an empty response. Check your server.", file=sys.stderr)
+        sys.exit(1)
 
     with open(cumulative, "a") as f:
         f.write("\n" + summary)
@@ -86,7 +103,13 @@ Format your response EXACTLY as follows — do not add any preamble, commentary,
     with open(cumulative, "w") as f:
         f.write(new_content)
 
-    print(f"✓ Chapter {chapter} summarized")
+    # Verify the update stuck
+    with open(cumulative) as f:
+        verify = f.read()
+    if f"Completed Chapters: {chapter}" not in verify:
+        print(f"WARNING: cumulative_summary.md may not have updated correctly", file=sys.stderr)
+    else:
+        print(f"✓ Chapter {chapter} summarized — cumulative_summary.md updated (Completed Chapters: {chapter})")
 
     # --- Generate next chapter beats ---
     with open(story_bible) as f:
@@ -113,15 +136,29 @@ INSTRUCTIONS:
 - Plant seeds for future chapters in "Open Threads / Loose Ends"
 - Do not include any preamble or commentary — output only the beats document"""
 
-    if os.path.exists(next_beats):
+    total_chapters = get_default_chapters()
+    is_last_chapter = int(chapter) >= total_chapters
+
+    if is_last_chapter:
+        print(f"\n✓ Final chapter ({chapter}/{total_chapters}) summarized — no next beats needed.")
+    elif os.path.exists(next_beats):
         print(f"Note: chapters/chapter_{next_chapter}_beats.md already exists — skipping beats generation.")
     else:
         print()
         print(f"Generating Chapter {next_chapter} beats (streaming):")
         print("-" * 40)
-        next_beats_content = stream_llm(user_prompt2, model="beats", system=system_prompt2)
+        try:
+            next_beats_content = stream_llm(user_prompt2, model="beats", system=system_prompt2)
+        except Exception as e:
+            print(f"\nERROR: LLM call failed during beats generation: {e}", file=sys.stderr)
+            sys.exit(1)
         print("-" * 40)
         print()
+
+        if not next_beats_content or len(next_beats_content.strip()) < 50:
+            print(f"ERROR: Next beats output is empty or too short ({len(next_beats_content.strip()) if next_beats_content else 0} chars)", file=sys.stderr)
+            sys.exit(1)
+
         with open(next_beats, "w") as f:
             f.write(next_beats_content)
         print(f"✓ chapters/chapter_{next_chapter}_beats.md written")
