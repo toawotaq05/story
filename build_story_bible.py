@@ -64,15 +64,12 @@ def main():
     print(f"Local mode: {is_local_mode()}")
     print()
 
-    config_section = f"""### Configuration Settings
+    chapter_words = word_count_target // default_chapters
+    config_section = f"""### Story Specifications
 
-Please adhere to the following specifications when generating the story:
+The finished story will have {default_chapters} chapters totaling approximately {word_count_target:,} words (~{chapter_words:,} words per chapter).
 
-- **Target Word Count:** {word_count_target:,} words (approximately)
-- **Number of Chapters:** {default_chapters} chapters
-- **Chapter Length:** Approximately {word_count_target // default_chapters:,} words per chapter
-
-These constraints should guide your creative choices for story structure, character development, and plot complexity.
+Use these specs to plan your story bible — character arcs, plot beats, pacing, and chapter structure. This is a PLANNING DOCUMENT, not the story itself. Do not write prose or story text — only the outline and worldbuilding details.
 """
 
     # ----------------------------------------------------------------

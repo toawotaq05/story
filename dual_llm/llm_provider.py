@@ -56,7 +56,7 @@ def _stream_local(prompt, model=None, system="", silent=False):
         "model": model_id,
         "messages": messages,
         "temperature": 0.7,
-        "max_tokens": 16384,
+        "max_tokens": 32768,
         "stream": True,
     }
 
@@ -74,6 +74,7 @@ def _stream_local(prompt, model=None, system="", silent=False):
         raise RuntimeError(f"Local LLM request failed ({r.status_code}): {r.text[:500]}")
 
     output = []
+    reasoning = []  # Track reasoning separately — don't include in final output
     for line in r.iter_lines():
         if not line:
             continue
@@ -85,19 +86,29 @@ def _stream_local(prompt, model=None, system="", silent=False):
         try:
             chunk = _json.loads(line)
             delta = chunk.get("choices", [{}])[0].get("delta", {})
-            content = delta.get("content", "")
+            content = delta.get("content") or ""
+            reason = delta.get("reasoning_content") or ""
             if content:
                 if not silent:
                     sys.stdout.write(content)
                     sys.stdout.flush()
                 output.append(content)
+            elif reason:
+                reasoning.append(reason)
+                if not silent:
+                    sys.stderr.write(f"[thinking: {len(reason)} chars]\n")
+                    sys.stderr.flush()
         except Exception:
             continue
 
     if not silent:
         sys.stdout.flush()
 
-    return "".join(output)
+    # Return actual content if we got any, otherwise fall back to reasoning
+    result = "".join(output)
+    if not result.strip():
+        result = "".join(reasoning)
+    return result
 
 
 def _stream_remote(prompt, model=None, system="", silent=False):
