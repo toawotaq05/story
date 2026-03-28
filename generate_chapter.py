@@ -208,14 +208,28 @@ def generate_all_sequential(script_dir, skip_existing=True, silent=False):
             # No beats for this chapter — story is complete
             break
 
-        if skip_existing and os.path.exists(draft_path):
-            print(f"[{ch_str}] Skipping chapter {ch_str} — draft exists")
-            ch += 1
-            continue
+        # Check if this chapter has already been summarized
+        cumulative_path = os.path.join(script_dir, "cumulative_summary.md")
+        chapter_summarized = False
+        if os.path.exists(cumulative_path):
+            with open(cumulative_path) as f:
+                cum_text = f.read()
+            chapter_summarized = f"### Chapter {ch}" in cum_text or f"### Chapter {ch} " in cum_text
 
-        print(f"\n[{ch_str}] Generating chapter {ch_str}...")
-        wc, _ = generate_chapter(ch_str, script_dir, silent=silent)
-        print(f"  ✓ chapter_{ch_str}_draft.txt written ({wc:,} words)")
+        if os.path.exists(draft_path) and chapter_summarized:
+            # Fully done — skip entirely
+            if skip_existing:
+                print(f"[{ch_str}] Skipping chapter {ch_str} — draft exists and is summarized")
+                ch += 1
+                continue
+        elif os.path.exists(draft_path) and not chapter_summarized:
+            # Draft exists but never summarized — summarize only, don't regenerate
+            print(f"[{ch_str}] Draft exists but not yet summarized — summarizing...")
+        elif not os.path.exists(draft_path):
+            # No draft — generate it
+            print(f"\n[{ch_str}] Generating chapter {ch_str}...")
+            wc, _ = generate_chapter(ch_str, script_dir, silent=silent)
+            print(f"  ✓ chapter_{ch_str}_draft.txt written ({wc:,} words)")
 
         # Summarize + generate next beats via the existing summarize_chapter.py script
         print(f"  → Summarizing chapter {ch_str}...")
@@ -239,17 +253,21 @@ def generate_all_sequential(script_dir, skip_existing=True, silent=False):
             print(f"  ✓ chapter {ch_str} summarized, cumulative_summary.md updated")
 
         # Generate next-beats directly (summarize_chapter.py may have already done this)
-        next_beats_path = os.path.join(chapters_dir, f"chapter_{ch+1}_beats.md")
-        if os.path.exists(next_beats_path):
-            print(f"  ✓ chapter_{ch+1}_beats.md already exists")
+        # Skip for the last chapter — no beats needed beyond total_chapters
+        if ch >= total_chapters:
+            pass  # Final chapter, no next beats
         else:
-            print(f"  → Generating chapter_{ch+1}_beats.md...")
-            try:
-                bp = generate_next_chapter_beats(ch_str, script_dir)
-                if bp:
-                    print(f"  ✓ chapter_{ch+1}_beats.md written")
-            except Exception as e:
-                print(f"  ⚠ Could not generate next beats: {e}")
+            next_beats_path = os.path.join(chapters_dir, f"chapter_{ch+1}_beats.md")
+            if os.path.exists(next_beats_path):
+                print(f"  ✓ chapter_{ch+1}_beats.md already exists")
+            else:
+                print(f"  → Generating chapter_{ch+1}_beats.md...")
+                try:
+                    bp = generate_next_chapter_beats(ch_str, script_dir)
+                    if bp:
+                        print(f"  ✓ chapter_{ch+1}_beats.md written")
+                except Exception as e:
+                    print(f"  ⚠ Could not generate next beats: {e}")
 
         print()
         ch += 1
