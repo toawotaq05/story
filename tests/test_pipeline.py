@@ -222,7 +222,7 @@ class TestMockedLLM(unittest.TestCase):
 
     @unittest.mock.patch("subprocess.Popen")
     def test_stream_llm_calls_correct_args(self, mock_popen):
-        """stream_llm should call subprocess.Popen with llm, model, and --stream."""
+        """stream_llm should call subprocess.Popen with llm and model (no --stream flag)."""
         import io
 
         class MockProcess:
@@ -250,7 +250,7 @@ class TestMockedLLM(unittest.TestCase):
 
         mock_popen.return_value = MockProcess()
 
-        from build_story_bible import stream_llm
+        from dual_llm.llm_provider import stream_llm
         original_popen = subprocess.Popen
         subprocess.Popen = mock_popen
         try:
@@ -258,12 +258,13 @@ class TestMockedLLM(unittest.TestCase):
         finally:
             subprocess.Popen = original_popen
 
-        # Verify Popen was called with expected args
+        # Verify Popen was called with expected args (no --stream flag)
         mock_popen.assert_called_once()
         call_args = mock_popen.call_args[0][0]
         self.assertEqual(call_args[0], "llm")
         self.assertEqual(call_args[1], "-m")
-        self.assertEqual(call_args[5], "--stream")
+        # Verify --stream is NOT in the arguments
+        self.assertNotIn("--stream", call_args)
 
     @unittest.mock.patch("subprocess.run")
     def test_generate_chapter_reads_cumulative_init(self, mock_run):

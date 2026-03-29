@@ -14,7 +14,7 @@ def get_config():
             with open(CONFIG_PATH) as f:
                 _config_cache = json.load(f)
         else:
-            _config_cache = {"models": {}, "story": {}, "local_mode": False}
+            _config_cache = {"models": {}, "story": {}}
     return _config_cache
 
 def get_model(task, default=None):
@@ -31,13 +31,16 @@ def get_word_count_target():
     return cfg.get("story", {}).get("word_count_target", 25000)
 
 def is_local_mode():
-    """Return True if local_mode is enabled in config.json."""
-    return get_config().get("local_mode", False)
+    """Check if we're using local llama.cpp server."""
+    cfg = get_config()
+    return cfg.get("local_mode", False)
 
 def get_local_endpoint():
-    """Return the local llama.cpp server endpoint URL."""
-    return get_config().get("local_endpoint", "http://localhost:8080")
+    """Get the local llama.cpp server endpoint."""
+    cfg = get_config()
+    return cfg.get("local_endpoint", "http://localhost:8080")
 
 def get_local_model():
-    """Return the model name to use with the local server."""
-    return get_config().get("local_model", "qwen3.5-4b")
+    """Get the local model identifier."""
+    cfg = get_config()
+    return cfg.get("local_model", "local")

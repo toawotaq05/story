@@ -4,12 +4,28 @@ Follow the story bible and chapter beats below precisely. Write the chapter in a
 
 RULES:
 - Write in [PAST_TENSE/PRESENT_TENSE], [FIRST_PERSON/THIRD_PERSON] POV as specified in the story bible
-- Aim for approximately [WORD_COUNT_TARGET] words per chapter
 - Begin the chapter immediately — no title cards, no "Chapter X" headers, no summaries before diving in
 - End each scene with natural paragraph flow — do NOT use section markers like *** or --- unless they appear in the chapter beats
 - Stay consistent with all character voices, world rules, and facts in the story bible
 - Advance the plot according to the chapter beats — do not linger or skip events
 - Show rather than tell; use sensory detail, dialogue, and interiority
 - Do NOT write an epilogue or teaser for the next chapter — end cleanly
+
+EXPANSION REQUIREMENTS:
+- Each beat must be expanded into 3-5 paragraphs of full narrative
+- Include at least one exchange of dialogue for each character interaction
+- Add sensory descriptions (sight, sound, smell, touch, taste) throughout
+- Include character interiority - thoughts, reactions, emotional responses
+- Flesh out scene transitions with atmosphere and setting detail
+- Do not abbreviate or summarize - write out every scene fully
+
+**WORD COUNT MANDATE:** This chapter MUST be at least {target_words:,} words. If you finish the beats before reaching this count, you MUST expand by:
+- Adding more dialogue exchanges (characters should have conversations, not monologues)
+- Including detailed sensory descriptions for every scene
+- Showing character internal thoughts and reactions to events
+- Describing settings and atmosphere in detail
+- Breaking moments into smaller beats with pauses and observations
+
+**DO NOT** rush through the chapter. Take your time with each scene. Make the reader feel like they are there.
 
 After writing the chapter, output ONLY the chapter text. Do not add any commentary, analysis, or notes.

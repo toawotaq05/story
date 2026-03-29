@@ -3,30 +3,23 @@
 summarize_chapter.py — Summarize a completed chapter, update cumulative_summary.md,
 and generate the next chapter's beats. Streaming output enabled.
 """
-import argparse
-import os
-import re
-import sys
-
+import sys, os, re
 from dual_llm import stream_llm
-from config import get_default_chapters
-
+from config import get_model
 
 def main():
-    parser = argparse.ArgumentParser(description="Summarize a chapter and generate next beats")
-    parser.add_argument("chapter", help="Chapter number to summarize")
-    parser.add_argument("--quiet", action="store_true",
-                        help="Suppress non-essential output (useful when called by generate_chapter.py --all)")
-    args = parser.parse_args()
+    if len(sys.argv) < 2:
+        print("Usage: python3 summarize_chapter.py <chapter_number>")
+        sys.exit(1)
 
-    script_dir   = os.path.dirname(os.path.abspath(__file__))
-    chapter      = args.chapter
+    chapter = sys.argv[1]
     next_chapter = str(int(chapter) + 1)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
 
     chapter_draft = os.path.join(script_dir, f"chapters/chapter_{chapter}_draft.txt")
-    next_beats    = os.path.join(script_dir, f"chapters/chapter_{next_chapter}_beats.md")
-    cumulative    = os.path.join(script_dir, "cumulative_summary.md")
-    story_bible   = os.path.join(script_dir, "story_bible.md")
+    next_beats = os.path.join(script_dir, f"chapters/chapter_{next_chapter}_beats.md")
+    cumulative = os.path.join(script_dir, "cumulative_summary.md")
+    story_bible = os.path.join(script_dir, "story_bible.md")
 
     if not os.path.exists(chapter_draft):
         print(f"ERROR: Chapter draft not found: {chapter_draft}")
@@ -36,14 +29,8 @@ def main():
     with open(chapter_draft) as f:
         draft_content = f.read()
 
-    print(f"=== Summarizing Chapter {chapter} ===\n")
-
-    # Read cumulative to check current state
-    if os.path.exists(cumulative):
-        with open(cumulative) as f:
-            existing_cum = f.read()
-    else:
-        existing_cum = ""
+    print(f"=== Summarizing Chapter {chapter} ===")
+    print()
 
     system_prompt = (
         "You are a story analyst. Read the chapter draft below and produce a "
@@ -76,45 +63,29 @@ Format your response EXACTLY as follows — do not add any preamble, commentary,
 
     print("Summarizing chapter (streaming):")
     print("-" * 40)
-    try:
-        summary = stream_llm(user_prompt, model="summarize", system=system_prompt)
-    except Exception as e:
-        print(f"\nERROR: LLM call failed during summarization: {e}", file=sys.stderr)
-        sys.exit(1)
+    summary = stream_llm(user_prompt, system=system_prompt)
     print("-" * 40)
     print()
 
-    if not summary or len(summary.strip()) < 50:
-        print(f"ERROR: Summary is empty or too short ({len(summary.strip()) if summary else 0} chars)", file=sys.stderr)
-        print("The LLM may have returned an empty response. Check your server.", file=sys.stderr)
-        sys.exit(1)
-
     with open(cumulative, "a") as f:
         f.write("\n" + summary)
-
     with open(cumulative) as f:
         content = f.read()
-
     new_content = re.sub(
-        r"(\*{0,2}Completed Chapters:\*{0,2}\s*)\d+",
-        rf"\g<1>{chapter}",
-        content,
+        r'(Completed Chapters:\s*)\d+',
+        rf'\g<1>{chapter}',
+        content
     )
     with open(cumulative, "w") as f:
         f.write(new_content)
 
-    # Verify the update stuck
-    with open(cumulative) as f:
-        verify = f.read()
-    if re.search(rf"Completed Chapters:\*{{0,2}}\s*{chapter}(?!\d)", verify) is None:
-        print(f"WARNING: cumulative_summary.md may not have updated correctly", file=sys.stderr)
-    else:
-        print(f"✓ Chapter {chapter} summarized — cumulative_summary.md updated (Completed Chapters: {chapter})")
+    print(f"✓ Chapter {chapter} summarized")
 
     # --- Generate next chapter beats ---
     with open(story_bible) as f:
         story_bible_text = f.read()
-    with open(os.path.join(script_dir, f"chapters/chapter_{chapter}_beats.md")) as f:
+    current_beats = os.path.join(script_dir, f"chapters/chapter_{chapter}_beats.md")
+    with open(current_beats) as f:
         beats_format = f.read()
 
     system_prompt2 = "You are a story architect."
@@ -136,29 +107,15 @@ INSTRUCTIONS:
 - Plant seeds for future chapters in "Open Threads / Loose Ends"
 - Do not include any preamble or commentary — output only the beats document"""
 
-    total_chapters = get_default_chapters()
-    is_last_chapter = int(chapter) >= total_chapters
-
-    if is_last_chapter:
-        print(f"\n✓ Final chapter ({chapter}/{total_chapters}) summarized — no next beats needed.")
-    elif os.path.exists(next_beats):
+    if os.path.exists(next_beats):
         print(f"Note: chapters/chapter_{next_chapter}_beats.md already exists — skipping beats generation.")
     else:
         print()
         print(f"Generating Chapter {next_chapter} beats (streaming):")
         print("-" * 40)
-        try:
-            next_beats_content = stream_llm(user_prompt2, model="beats", system=system_prompt2)
-        except Exception as e:
-            print(f"\nERROR: LLM call failed during beats generation: {e}", file=sys.stderr)
-            sys.exit(1)
+        next_beats_content = stream_llm(user_prompt2, model=get_model("beats"), system=system_prompt2)
         print("-" * 40)
         print()
-
-        if not next_beats_content or len(next_beats_content.strip()) < 50:
-            print(f"ERROR: Next beats output is empty or too short ({len(next_beats_content.strip()) if next_beats_content else 0} chars)", file=sys.stderr)
-            sys.exit(1)
-
         with open(next_beats, "w") as f:
             f.write(next_beats_content)
         print(f"✓ chapters/chapter_{next_chapter}_beats.md written")
@@ -174,11 +131,9 @@ INSTRUCTIONS:
     for line in content.split("\n"):
         if line.startswith("### Chapter "):
             print(" ", line)
-    if not args.quiet:
-        print()
-        print("Next step:")
-        print(f"  python3 generate_chapter.py {next_chapter}")
-
+    print()
+    print("Next step:")
+    print(f"  python3 generate_chapter.py {next_chapter}")
 
 if __name__ == "__main__":
     main()

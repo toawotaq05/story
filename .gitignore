@@ -6,6 +6,15 @@ __pycache__/
 story_bible.md
 cumulative_summary.md
 book.md
+chapters/*_draft.txt
+chapters/*_polished.txt
+chapters/*_generation_log.md
+
+# Backup files
+*.backup
+
+# Experimental scripts
+*_scenes.py
 
 # OS / editor
 .DS_Store

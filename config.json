@@ -12,5 +12,5 @@
     },
     "local_mode": true,
     "local_endpoint": "http://localhost:8080",
-    "local_model": "gemma3-27b-vl-polaris"
+    "local_model": "local"
 }

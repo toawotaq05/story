@@ -20,6 +20,24 @@ from config import get_model, get_default_chapters
 
 DEFAULT_CHAPTERS = get_default_chapters()
 
+DEFAULT_BEATS_TEMPLATE = """# Chapter {chapter} — {title}
+
+## Chapter Beats
+
+### Beat 1: [Hook/Opening]
+- 
+
+### Beat 2: [Inciting Incident/Development]
+- 
+
+### Beat 3: [Midpoint/Rising Action]
+- 
+
+### Beat 4: [Climax/Resolution]
+- 
+
+(Write detailed scene descriptions, dialogue cues, and sensory details for each beat. Each beat should be a self-contained scene that advances the story.)"""
+
 def main():
     parser = argparse.ArgumentParser(description="Plan the full chapter outline before writing.")
     parser.add_argument("concept", nargs="?", default=None,
@@ -198,7 +216,7 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
             with open(template_path) as f:
                 beats_template = f.read()
         else:
-            beats_template = None
+            beats_template = DEFAULT_BEATS_TEMPLATE
 
         for ch_num, ch_title, ch_summary in chapter_entries:
             beats_file = os.path.join(chapters_dir, f"chapter_{ch_num}_beats.md")
@@ -228,6 +246,11 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
             prior_context = "\n\n".join(prior_beats) if prior_beats else "(No prior chapters — this is the opening)"
 
             system_prompt = "You are a story architect."
+            # Format template with current chapter details
+            current_template = beats_template
+            if "{chapter}" in current_template:
+                current_template = current_template.format(chapter=ch_num, title=ch_title)
+
             user_prompt = f"""Write detailed chapter beats for Chapter {ch_num} of the story.
 
 CHAPTER OUTLINE ENTRY:
@@ -239,7 +262,7 @@ STORY BIBLE (do not change established facts):
 STORY SO FAR (prior chapter beats):
 {prior_context}
 
-{f"CHAPTER BEATS TEMPLATE (follow this exact format):\n{beats_template}" if beats_template else ""}
+{f"CHAPTER BEATS TEMPLATE (follow this exact format):\n{current_template}" if current_template else ""}
 
 INSTRUCTIONS:
 - Follow the format of the template above exactly

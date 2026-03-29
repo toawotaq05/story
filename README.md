@@ -11,7 +11,7 @@ git clone git@github.com:toawotaq05/story.git
 cd story
 ```
 
-All scripts are Python 3. Required: `llm` CLI with OpenRouter plugin configured.
+All scripts are Python 3. Required: `llm` CLI with OpenRouter plugin configured for remote models, or a local llama.cpp server for local inference.
 
 ---
 
@@ -22,20 +22,23 @@ Edit `config.json` to set models per task and story targets:
 ```json
 {
     "models": {
-        "story_bible": "openrouter/thedrummer/cydonia-24b-v4.1",
-        "outline":     "openrouter/thedrummer/cydonia-24b-v4.1",
-        "beats":       "openrouter/thedrummer/cydonia-24b-v4.1",
+        "story_bible": "openrouter/qwen/qwen3-235b-a22b",
+        "outline":     "openrouter/qwen/qwen3-235b-a22b",
+        "beats":       "openrouter/qwen/qwen3-235b-a22b",
         "write":       "openrouter/thedrummer/cydonia-24b-v4.1",
-        "summarize":   "openrouter/thedrummer/cydonia-24b-v4.1"
+        "summarize":   "openrouter/qwen/qwen3-235b-a22b"
     },
     "story": {
-        "default_chapters": 10,
-        "word_count_target": 25000
-    }
+        "default_chapters": 8,
+        "word_count_target": 20000
+    },
+    "local_mode": true,
+    "local_endpoint": "http://localhost:8080",
+    "local_model": "local"
 }
 ```
 
-Each task can use a different model. Targets are advisory — `status.py` tracks progress against them.
+Each task can use a different model. Set `local_mode: true` to use a local llama.cpp server (faster, cheaper) or false for remote APIs. Targets are advisory — `status.py` tracks progress against them.
 
 ---
 
@@ -67,11 +70,10 @@ python3 status.py
 |--------|---------|
 | `build_story_bible.py` | Generate story bible + chapter 1 beats from a concept |
 | `plan_chapters.py` | Generate chapter outline; optionally all beats upfront |
-| `generate_chapter.py` | Write a chapter draft (streaming output) |
-| `summarize_chapter.py` | Summarize chapter, update history, auto-generate next beats |
+| `generate_chapter.py` | Write a chapter draft using **per‑beat expansion** for maximum word count (streaming output) |
+| `summarize_chapter.py` | Summarize chapter, update history, auto‑generate next beats |
 | `status.py` | Show chapter progress, word counts, story title |
 | `compile.py` | Assemble all chapter drafts into a single .md ebook |
-| `config.py` | Shared config reader — all scripts import from here |
 
 ---
 
@@ -88,7 +90,7 @@ python3 generate_chapter.py 2
 # ... each streams live to your terminal
 ```
 
-### Iterative (chapter-by-chapter)
+### Iterative (chapter‑by‑chapter)
 
 ```sh
 python3 build_story_bible.py "concept"
@@ -98,7 +100,31 @@ python3 generate_chapter.py 2
 # ...
 ```
 
-The iterative flow is slower but lets you course-correct each chapter before the next is planned.
+The iterative flow is slower but lets you course‑correct each chapter before the next is planned.
+
+---
+
+## `generate_chapter.py` – Per‑Beat Expansion
+
+`generate_chapter.py` now uses **per‑beat expansion** by default to maximize word count and narrative detail:
+
+- **Four beats per chapter** (configurable in beats files)
+- **Each beat expanded separately** with targeted word‑count instructions
+- **Clear scene separation** with `***` markers (configurable)
+- **Smart overshoot management** – local models tend to write ~1.5× requested length
+
+### Options
+
+```sh
+python3 generate_chapter.py 1                     # default settings
+python3 generate_chapter.py 1 --no-separator      # no scene separators
+python3 generate_chapter.py 1 --separator "###"   # custom separator
+python3 generate_chapter.py 1 --raw-targets       # use raw word targets (no overshoot adjustment)
+python3 generate_chapter.py 1 --overshoot-factor 1.3  # adjust expansion factor
+python3 generate_chapter.py 1 --silent            # suppress streaming output
+```
+
+**Word‑count results**: Expect ~120‑150% of target word count with default settings (overshoot‑factor 1.5). Use `--overshoot‑factor 1.3` for tighter control, `--raw‑targets` for raw model behavior.
 
 ---
 
@@ -110,6 +136,8 @@ python3 plan_chapters.py --beats --chapters 8  # override chapter count
 python3 plan_chapters.py --regen-outline        # regenerate outline only
 python3 plan_chapters.py --regen-beats          # regenerate all beats from current outline
 ```
+
+Beats are generated in the `### Beat N:` format required by the per‑beat expansion pipeline.
 
 ---
 
@@ -127,24 +155,26 @@ python3 plan_chapters.py --regen-beats          # regenerate all beats from curr
 python3 generate_chapter.py --all
 ```
 
-**NEW BEHAVIOR:** The `--all` flag now mimics the manual workflow by automatically summarizing each chapter and updating `cumulative_summary.md`. This single command provides a complete, self-contained workflow:
+**BEHAVIOR:** The `--all` flag now runs the complete sequential workflow using **per‑beat expansion**:
 
-1. **Generates all chapter drafts** from `chapter_N_beats.md` files
+1. **Generates all chapter drafts** from `chapter_N_beats.md` files (per‑beat expansion)
 2. **Automatically updates** `cumulative_summary.md` with chapter summaries
 3. **Tracks completed chapters** and generates next chapter beats as needed
-4. **Streams output live** to the terminal for real-time visibility
+4. **Streams output live** to the terminal for real‑time visibility
 
 When you run `--all`, it performs the following steps:
 - Processes all chapters from 1 to N (where N is defined in your beats files)
+- Uses per‑beat expansion for maximum word count
 - Calls summarization logic after generating each chapter draft
 - Updates the cumulative story history with key plot points, character status, and open threads
 - Generates beats for the next chapter if they don't already exist
 
-This eliminates the need for a separate `summarize_chapter.py` call when using `--all`, making it a true "one-command" solution for complete book generation.
+This eliminates the need for a separate `summarize_chapter.py` call when using `--all`, making it a true "one‑command" solution for complete book generation.
 
 ```sh
 python3 generate_chapter.py --all --no-skip   # overwrite existing drafts
-python3 generate_chapter.py 1 custom_path.txt  # single chapter to custom path
+python3 generate_chapter.py --all --separator ""  # generate without scene separators
+python3 generate_chapter.py --all --overshoot-factor 1.3  # tighter word‑count control
 ```
 
 ### Assemble into a Book
@@ -155,16 +185,18 @@ python3 compile.py                   # writes book.md
 python3 compile.py --output full.md  # custom output path
 ```
 
-`compile.py` extracts chapter titles from the outline, adds word-count annotations per chapter, and produces a clean `.md` file ready for pandoc or similar.
+`compile.py` extracts chapter titles from the outline, adds word‑count annotations per chapter, and produces a clean `.md` file ready for pandoc or similar.
 
 ## Tips
 
-- **Edit the chapter outline** in `story_bible.md` before generating beats — reorder chapters, change summaries, cull chapters. Then run `--regen-beats`.
+- **Edit the chapter outline** in `story_bible.md` before generating beats — reorder chapters, change summaries, cull chapters. Then run `--regen‑beats`.
 - **Edit any beats file** before generating its chapter — beats are prompts, not contracts.
-- **`--regen-beats`** regenerates all beats from the current outline without changing the outline itself.
+- **`--regen‑beats`** regenerates all beats from the current outline without changing the outline itself.
 - Streaming output on all LLM calls — text appears live, no waiting in silence.
 - **Regenerate a chapter**: delete `chapter_N_draft.txt`, edit beats, rerun `generate_chapter.py N`.
-- **Re-summarize**: remove the chapter's entry from `cumulative_summary.md`, rerun `summarize_chapter.py N`.
+- **Re‑summarize**: remove the chapter's entry from `cumulative_summary.md`, rerun `summarize_chapter.py N`.
+- **Control word count**: Use `--overshoot‑factor` (default 1.5) to adjust expansion. Lower values = closer to target.
+- **Scene transitions**: Default `***` separators make beat boundaries clear. Use `--separator ""` for seamless joins.
 
 ---
 
@@ -185,6 +217,19 @@ Target is advisory. `status.py` shows progress:
 ```
 Total draft words: 12,400 / 25,000 (49%)
 ```
+
+**Per‑beat expansion typically yields 120‑150% of target word count** due to local model verbosity. Adjust with `--overshoot‑factor`:
+
+| Factor | Result |
+|--------|--------|
+| 1.5 (default) | ~120‑150% of target |
+| 1.3 | ~100‑120% of target |
+| 1.0 (--raw‑targets) | ~80‑100% of target |
+
+Example: 2,500‑word chapter target yields:
+- Default: 3,000‑3,750 words
+- `--overshoot‑factor 1.3`: 2,500‑3,000 words
+- `--raw‑targets`: 2,000‑2,500 words
 
 | Chapters | Words/chapter | Total |
 |----------|--------------|-------|

@@ -7,6 +7,7 @@ Remote mode: uses `llm` CLI subprocess (same as the original working scripts)
 import subprocess
 import sys
 import threading
+import time
 import json as _json
 import os
 
@@ -38,7 +39,7 @@ def stream_llm(prompt, model=None, system="", silent=False):
         return _stream_remote(prompt, model=model, system=system, silent=silent)
 
 
-def _stream_local(prompt, model=None, system="", silent=False):
+def _stream_local(prompt, model=None, system="", silent=False, retries=3, backoff=2):
     """Call the local llama.cpp server via HTTP with streaming output."""
     import requests
 
@@ -60,18 +61,33 @@ def _stream_local(prompt, model=None, system="", silent=False):
         "stream": True,
     }
 
-    if not silent:
-        print(f"[local] POST {url}  model={model_id}")
+    for attempt in range(retries):
+        if attempt > 0:
+            wait_time = backoff * (2 ** (attempt - 1))  # Exponential backoff
+            if not silent:
+                print(f"[local] Retry {attempt + 1}/{retries} after {wait_time}s...")
+            time.sleep(wait_time)
+        
+        if not silent:
+            print(f"[local] POST {url}  model={model_id}")
 
-    r = requests.post(
-        url,
-        json=payload,
-        headers={"Content-Type": "application/json"},
-        stream=True,
-        timeout=300,
-    )
-    if r.status_code != 200:
-        raise RuntimeError(f"Local LLM request failed ({r.status_code}): {r.text[:500]}")
+        try:
+            r = requests.post(
+                url,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                stream=True,
+                timeout=300,
+            )
+            if r.status_code != 200:
+                raise RuntimeError(f"Local LLM request failed ({r.status_code}): {r.text[:500]}")
+            
+            # Success - process response
+            break
+        except Exception as e:
+            if attempt == retries - 1:
+                raise RuntimeError(f"Local LLM failed after {retries} attempts: {e}")
+            continue
 
     output = []
     reasoning = []  # Track reasoning separately — don't include in final output
@@ -108,7 +124,7 @@ def _stream_local(prompt, model=None, system="", silent=False):
     return result
 
 
-def _stream_remote(prompt, model=None, system="", silent=False):
+def _stream_remote(prompt, model=None, system="", silent=False, retries=3, backoff=2):
     """Call the remote LLM via `llm` CLI subprocess with streaming output."""
     # Resolve model alias (e.g. "story_bible" → "openrouter/qwen/qwen3-235b-a22b")
     # Import here to avoid circular imports with config.py
@@ -118,45 +134,57 @@ def _stream_remote(prompt, model=None, system="", silent=False):
     else:
         resolved = get_model("write")
 
-    cmd = ["llm", "-m", resolved]
-    if system:
-        cmd += ["-s", system]
+    for attempt in range(retries):
+        if attempt > 0:
+            wait_time = backoff * (2 ** (attempt - 1))  # Exponential backoff
+            if not silent:
+                print(f"[remote] Retry {attempt + 1}/{retries} after {wait_time}s...")
+            time.sleep(wait_time)
+        
+        cmd = ["llm", "-m", resolved]
+        if system:
+            cmd += ["-s", system]
 
-    proc = subprocess.Popen(
-        cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=1,
-    )
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
 
-    output = []
+        output = []
 
-    def pump():
-        try:
-            for char in iter(lambda: proc.stdout.read(1), ""):
-                if char:
-                    if not silent:
-                        sys.stdout.write(char)
-                        sys.stdout.flush()
-                    output.append(char)
-        except Exception:
-            pass
+        def pump():
+            try:
+                for char in iter(lambda: proc.stdout.read(1), ""):
+                    if char:
+                        if not silent:
+                            sys.stdout.write(char)
+                            sys.stdout.flush()
+                        output.append(char)
+            except Exception:
+                pass
 
-    t = threading.Thread(target=pump)
-    t.start()
+        t = threading.Thread(target=pump)
+        t.start()
 
-    # Write prompt, close stdin to signal end of input
-    proc.stdin.write(prompt)
-    proc.stdin.flush()
-    proc.stdin.close()
+        # Write prompt, close stdin to signal end of input
+        proc.stdin.write(prompt)
+        proc.stdin.flush()
+        proc.stdin.close()
 
-    proc.wait()
-    t.join(timeout=5)
+        proc.wait()
+        t.join(timeout=5)
 
-    if proc.returncode != 0:
-        stderr = proc.stderr.read() if proc.stderr else ""
-        raise RuntimeError(f"`llm` CLI failed (code {proc.returncode}): {stderr}")
+        if proc.returncode != 0:
+            stderr = proc.stderr.read() if proc.stderr else ""
+            if attempt == retries - 1:
+                raise RuntimeError(f"`llm` CLI failed after {retries} attempts (code {proc.returncode}): {stderr}")
+            continue
+        
+        # Success
+        break
 
     return "".join(output)
