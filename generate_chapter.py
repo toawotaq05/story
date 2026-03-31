@@ -16,7 +16,8 @@ from datetime import datetime
 
 from chapter_planning import (
     build_chapter_beats_prompt,
-    build_chapter_draft_prompt,
+    build_chapter_revision_prompt,
+    build_scene_block_prompt,
     find_chapter_entry,
     get_target_words_per_chapter,
     get_total_chapters,
@@ -36,8 +37,10 @@ from paths import (
 )
 from story_utils import (
     build_initial_cumulative_summary,
+    group_beats_into_blocks,
     has_summary_for_chapter,
     is_valid_beats_document,
+    parse_beats,
 )
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -90,7 +93,21 @@ def ensure_cumulative_summary(story_bible_text):
     return content
 
 
-def generate_chapter(chapter, script_dir, silent=False, output_file=None):
+def summarize_block_text(text, word_limit=140):
+    words = text.split()
+    if len(words) <= word_limit:
+        return text.strip()
+    return " ".join(words[:word_limit]).strip() + " ..."
+
+
+def tail_text(text, word_limit=120):
+    words = text.split()
+    if len(words) <= word_limit:
+        return text.strip()
+    return "..." + " ".join(words[-word_limit:]).strip()
+
+
+def generate_chapter(chapter, script_dir, silent=False, output_file=None, beats_per_block=2, revise=True):
     ensure_runtime_dirs()
     story_bible = STORY_BIBLE_PATH
     chapter_brief = chapter_beats_path(chapter)
@@ -116,37 +133,91 @@ def generate_chapter(chapter, script_dir, silent=False, output_file=None):
     prepared_system_prompt, target_words_total = prepare_system_prompt(system_prompt, story_bible_text)
     chapter_entry = find_chapter_entry(story_bible_text, chapter)
     chapter_title = chapter_entry.title if chapter_entry else f"Chapter {chapter}"
-    prompt = build_chapter_draft_prompt(
-        story_bible_text,
-        cumulative_content,
-        chapter_beats_text,
-        prepared_system_prompt,
-        chapter,
-    )
+    beats = parse_beats(chapter_beats_text)
+    blocks = group_beats_into_blocks(beats, beats_per_block=beats_per_block)
 
     if not silent:
         print(f"\n{'=' * 70}")
         print(f"  GENERATING CHAPTER {chapter} — {chapter_title}")
         print(f"{'=' * 70}")
-        print(f"Method: chapter-brief drafting")
+        print("Method: staged scene-block drafting")
         print(f"Target: ~{target_words_total:,} words")
+        print(f"Blocks: {len(blocks)} (up to {beats_per_block} beats each)")
         print(f"{'=' * 70}\n")
 
-    max_words_for_llm = min(int(target_words_total * 1.8) + 750, 12000)
-    chapter_text = stream_llm(
-        prompt,
-        model=get_model("write"),
-        system="",
-        silent=silent,
-        max_words=max_words_for_llm,
-        loop_detection=True,
-    )
+    block_target_words = max(target_words_total // max(len(blocks), 1), 1)
+    block_max_words = min(int(block_target_words * 1.8) + 500, 7000)
+    block_texts = []
+    block_word_counts = []
+    prior_block_summaries = []
+
+    for block in blocks:
+        if not silent:
+            print(
+                f"Generating block {block['index']}/{len(blocks)} "
+                f"(beats {block['start_beat']}-{block['end_beat']})..."
+            )
+
+        prior_summary = "\n\n".join(prior_block_summaries)
+        prior_tail = tail_text(block_texts[-1]) if block_texts else ""
+        block_prompt = build_scene_block_prompt(
+            story_bible_text,
+            cumulative_content,
+            chapter_beats_text,
+            prepared_system_prompt,
+            chapter,
+            block,
+            prior_blocks_summary=prior_summary,
+            prior_text_tail=prior_tail,
+            total_blocks=len(blocks),
+        )
+        block_text = stream_llm(
+            block_prompt,
+            model=get_model("write"),
+            system="",
+            silent=silent,
+            max_words=block_max_words,
+            loop_detection=True,
+        )
+        block_texts.append(block_text.strip())
+        block_word_counts.append(len(block_text.split()))
+        prior_block_summaries.append(
+            f"Block {block['index']} summary: {summarize_block_text(block_text)}"
+        )
+
+        if not silent:
+            print(f"  {block_word_counts[-1]:,} words")
+
+    assembled_text = "\n\n".join(text for text in block_texts if text)
+
+    if revise:
+        if not silent:
+            print("Revising assembled chapter for flow...")
+        revision_prompt = build_chapter_revision_prompt(
+            story_bible_text,
+            cumulative_content,
+            chapter_beats_text,
+            prepared_system_prompt,
+            chapter,
+            assembled_text,
+        )
+        revision_max_words = min(int(target_words_total * 1.35) + 500, 12000)
+        chapter_text = stream_llm(
+            revision_prompt,
+            model=get_model("write"),
+            system="",
+            silent=silent,
+            max_words=revision_max_words,
+            loop_detection=True,
+        )
+    else:
+        chapter_text = assembled_text
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     metadata = (
         f"# Chapter {chapter} Draft\n"
         f"Generated: {timestamp}\n"
-        "Method: chapter-brief drafting\n"
+        "Method: staged scene-block drafting\n"
         f"Target: {target_words_total:,} words\n"
         f"Actual: {len(chapter_text.split()):,} words\n\n"
         "---\n\n"
@@ -164,9 +235,12 @@ def generate_chapter(chapter, script_dir, silent=False, output_file=None):
         f.write(
             f"# Generation Log - Chapter {chapter}\n"
             f"Timestamp: {timestamp}\n"
-            "Method: chapter-brief drafting\n"
+            "Method: staged scene-block drafting\n"
             f"Target: {target_words_total:,} words\n"
             f"Actual: {len(chapter_text.split()):,} words\n"
+            f"Blocks: {len(blocks)}\n"
+            f"Block word counts: {', '.join(str(count) for count in block_word_counts)}\n"
+            f"Revision pass: {'yes' if revise else 'no'}\n"
             f"Brief file: {os.path.basename(chapter_brief)}\n"
             f"Draft file: {os.path.basename(output_path)}\n"
         )
@@ -217,7 +291,7 @@ def generate_next_chapter_beats(chapter):
     return next_beats
 
 
-def generate_all_sequential(script_dir, skip_existing=True, silent=False):
+def generate_all_sequential(script_dir, skip_existing=True, silent=False, beats_per_block=2, revise=True):
     chapters_dir = CHAPTERS_DIR
     beats_files = sorted(
         glob.glob(os.path.join(chapters_dir, "chapter_*_beats.md")),
@@ -270,7 +344,13 @@ def generate_all_sequential(script_dir, skip_existing=True, silent=False):
             print(f"[{chapter}] Draft exists but not yet summarized — summarizing...")
         elif not os.path.exists(draft_path):
             print(f"\n[{chapter}] Generating chapter {chapter}...")
-            word_count, path = generate_chapter(chapter, script_dir, silent=silent)
+            word_count, path = generate_chapter(
+                chapter,
+                script_dir,
+                silent=silent,
+                beats_per_block=beats_per_block,
+                revise=revise,
+            )
             print(f"  ✓ {os.path.basename(path)} written ({word_count:,} words)")
 
         print(f"  → Summarizing chapter {chapter}...")
@@ -319,6 +399,18 @@ def main():
     parser.add_argument("--silent", action="store_true", help="Suppress streaming output")
     parser.add_argument("-o", "--output", help="Custom output path")
     parser.add_argument(
+        "--beats-per-block",
+        type=int,
+        default=2,
+        help="How many beats to combine into each draft block (default: 2)",
+    )
+    parser.add_argument(
+        "--no-revise",
+        action="store_false",
+        dest="revise",
+        help="Skip the final chapter-level smoothing pass",
+    )
+    parser.add_argument(
         "--skip-existing",
         action="store_true",
         default=True,
@@ -333,7 +425,13 @@ def main():
     args = parser.parse_args()
 
     if args.all:
-        generate_all_sequential(SCRIPT_DIR, skip_existing=args.skip_existing, silent=args.silent)
+        generate_all_sequential(
+            SCRIPT_DIR,
+            skip_existing=args.skip_existing,
+            silent=args.silent,
+            beats_per_block=args.beats_per_block,
+            revise=args.revise,
+        )
         return
 
     if not args.chapter:
@@ -344,6 +442,8 @@ def main():
         SCRIPT_DIR,
         silent=args.silent,
         output_file=args.output,
+        beats_per_block=args.beats_per_block,
+        revise=args.revise,
     )
     print(f"Wrote {output_path} ({word_count:,} words)")
 

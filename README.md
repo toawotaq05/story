@@ -27,11 +27,12 @@ The `.md` files under `chapters/` still use the `chapter_N_beats.md` name, but t
 
 The old drafting path expanded each `### Beat N:` block in a separate LLM call and stitched the outputs together. That made continuity, pacing, and chapter-level flow worse than it needed to be.
 
-The current flow keeps beats as planning scaffolding but drafts the chapter in one pass:
+The current flow keeps beats as planning scaffolding but drafts the chapter in staged blocks:
 
 - beats define intent, reversals, and ending targets
-- the writer prompt treats them as guidance, not hard scene boundaries
-- transitions and pacing are handled at the chapter level instead of per beat
+- the writer combines multiple beats into a larger scene block
+- each block is generated with carry-forward context from earlier blocks
+- an optional final revision pass smooths transitions and repetition
 
 This keeps the planning layer useful without forcing the prose layer into artificial chunks.
 
@@ -44,6 +45,13 @@ python3 generate_chapter.py 1
 python3 summarize_chapter.py 1
 python3 status.py
 python3 compile.py --dry-run
+```
+
+Drafting controls:
+
+```sh
+python3 generate_chapter.py 1 --beats-per-block 2
+python3 generate_chapter.py 1 --beats-per-block 1 --no-revise
 ```
 
 Generate all sequentially:

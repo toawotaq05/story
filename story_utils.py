@@ -166,6 +166,26 @@ def parse_beats(beats_content):
     return beats
 
 
+def group_beats_into_blocks(beats, beats_per_block=2):
+    if beats_per_block < 1:
+        raise ValueError("beats_per_block must be at least 1")
+
+    blocks = []
+    for index in range(0, len(beats), beats_per_block):
+        chunk = beats[index:index + beats_per_block]
+        start = chunk[0][0]
+        end = chunk[-1][0]
+        blocks.append(
+            {
+                "index": len(blocks) + 1,
+                "start_beat": start,
+                "end_beat": end,
+                "beats": chunk,
+            }
+        )
+    return blocks
+
+
 def is_valid_beats_document(content, min_beats=2):
     if not content or not content.strip().startswith("# Chapter"):
         return False

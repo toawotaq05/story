@@ -149,3 +149,99 @@ WRITING INSTRUCTIONS:
 
 Output ONLY the chapter text.
 """
+
+
+def build_scene_block_prompt(
+    story_bible_text,
+    cumulative_summary,
+    chapter_beats_text,
+    system_prompt,
+    chapter_number,
+    block,
+    prior_blocks_summary="",
+    prior_text_tail="",
+    total_blocks=1,
+):
+    entry = find_chapter_entry(story_bible_text, chapter_number)
+    chapter_label = (
+        f"Chapter {entry.number} — {entry.title}" if entry else f"Chapter {chapter_number}"
+    )
+
+    block_beats_text = "\n\n".join(text for _, text in block["beats"])
+    continuity_summary = prior_blocks_summary.strip() or "(This is the opening block.)"
+    prior_tail = prior_text_tail.strip() or "(No prior prose yet.)"
+
+    return f"""{system_prompt}
+
+STORY BIBLE:
+{story_bible_text}
+
+CURRENT STORY CONTEXT:
+{cumulative_summary}
+
+FULL CHAPTER BRIEF FOR {chapter_label}:
+{chapter_beats_text}
+
+OUTLINE SNAPSHOT:
+{build_outline_context(story_bible_text, chapter_number, window=1)}
+
+CURRENT BLOCK:
+- Block {block["index"]} of {total_blocks}
+- Covers beats {block["start_beat"]}-{block["end_beat"]}
+
+BLOCK BEATS:
+{block_beats_text}
+
+ALREADY WRITTEN IN THIS CHAPTER:
+{continuity_summary}
+
+TAIL OF PREVIOUS BLOCK PROSE:
+{prior_tail}
+
+WRITING INSTRUCTIONS:
+- Write only this block's prose
+- Start smoothly from the current chapter state; do not restart the chapter
+- Cover the required turns from these beats, but write natural scene flow instead of beat labels
+- Preserve continuity with the prior prose and aim toward the later beats in the full chapter brief
+- End this block at a strong handoff point for the next block unless this is the final block
+
+Output ONLY the prose for this block.
+"""
+
+
+def build_chapter_revision_prompt(
+    story_bible_text,
+    cumulative_summary,
+    chapter_beats_text,
+    system_prompt,
+    chapter_number,
+    assembled_text,
+):
+    entry = find_chapter_entry(story_bible_text, chapter_number)
+    chapter_label = (
+        f"Chapter {entry.number} — {entry.title}" if entry else f"Chapter {chapter_number}"
+    )
+
+    return f"""{system_prompt}
+
+STORY BIBLE:
+{story_bible_text}
+
+CURRENT STORY CONTEXT:
+{cumulative_summary}
+
+CHAPTER BRIEF FOR {chapter_label}:
+{chapter_beats_text}
+
+ASSEMBLED CHAPTER DRAFT:
+{assembled_text}
+
+REVISION INSTRUCTIONS:
+- Revise this assembled draft into one smooth, coherent chapter
+- Preserve the established events, ordering, and ending
+- Improve transitions, continuity, repetition, and pacing
+- Do not add title cards, notes, or commentary
+- Keep the chapter at roughly the same length unless a small adjustment improves flow
+
+Output ONLY the revised chapter text.
+"""
