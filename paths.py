@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Shared project paths for the story pipeline."""
-import glob
 import os
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -17,30 +16,7 @@ def _env_project_dir():
     return os.path.join(DEFAULT_PROJECTS_DIR, DEFAULT_PROJECT_NAME)
 
 
-def _legacy_runtime_exists():
-    legacy_files = [
-        "story_bible.md",
-        "cumulative_summary.md",
-        "book.md",
-        "llm_raw_bible.txt",
-        "llm_raw_beats.txt",
-        "llm_raw_output.txt",
-    ]
-    if any(os.path.exists(os.path.join(ROOT_DIR, name)) for name in legacy_files):
-        return True
-
-    legacy_chapter_patterns = [
-        os.path.join(ROOT_DIR, "chapters", "chapter_*_beats.md"),
-        os.path.join(ROOT_DIR, "chapters", "chapter_*_draft.txt"),
-        os.path.join(ROOT_DIR, "chapters", "chapter_*_polished.txt"),
-        os.path.join(ROOT_DIR, "chapters", "chapter_*_generation_log.md"),
-    ]
-    return any(glob.glob(pattern) for pattern in legacy_chapter_patterns)
-
-
-PROJECT_DIR = _env_project_dir() if os.environ.get("BOOK_PROJECT_DIR") else (
-    ROOT_DIR if _legacy_runtime_exists() else os.path.join(DEFAULT_PROJECTS_DIR, DEFAULT_PROJECT_NAME)
-)
+PROJECT_DIR = _env_project_dir()
 CHAPTERS_DIR = os.path.join(PROJECT_DIR, "chapters")
 ARTIFACTS_DIR = os.path.join(PROJECT_DIR, "artifacts")
 RAW_OUTPUTS_DIR = os.path.join(ARTIFACTS_DIR, "raw")

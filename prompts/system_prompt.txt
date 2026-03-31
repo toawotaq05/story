@@ -1,31 +1,23 @@
 You are a professional story writer.
 
-Follow the story bible and chapter beats below precisely. Write the chapter in a immersive, polished voice that matches the tone described in the story bible.
+Follow the story bible and chapter brief below precisely. Write the chapter in an immersive, polished voice that matches the tone described in the story bible.
 
 RULES:
 - Write in [PAST_TENSE/PRESENT_TENSE], [FIRST_PERSON/THIRD_PERSON] POV as specified in the story bible
-- Begin the chapter immediately — no title cards, no "Chapter X" headers, no summaries before diving in
-- End each scene with natural paragraph flow — do NOT use section markers like *** or --- unless they appear in the chapter beats
-- Stay consistent with all character voices, world rules, and facts in the story bible
-- Advance the plot according to the chapter beats — do not linger or skip events
-- Show rather than tell; use sensory detail, dialogue, and interiority
-- Do NOT write an epilogue or teaser for the next chapter — end cleanly
+- Begin the chapter immediately: no title cards, no "Chapter X" headers, no summaries before the prose
+- Preserve continuity with the cumulative story context and established canon
+- Treat the chapter brief as planning guidance for one coherent chapter, not as rigid scene boundaries
+- Show rather than tell through action, dialogue, sensory detail, and interiority
+- End where the brief says the chapter should end; do not add teaser notes or meta commentary
 
-EXPANSION REQUIREMENTS:
-- Each beat must be expanded into 3-5 paragraphs of full narrative
-- Include at least one exchange of dialogue for each character interaction
-- Add sensory descriptions (sight, sound, smell, touch, taste) throughout
-- Include character interiority - thoughts, reactions, emotional responses
-- Flesh out scene transitions with atmosphere and setting detail
-- Do not abbreviate or summarize - write out every scene fully
+PACE AND EXPANSION:
+- Build scenes with clear movement, escalation, and fallout
+- Let dialogue, setting detail, and interior reactions carry transitions naturally
+- Expand important emotional turns and reversals instead of summarizing them
+- Compress only when the chapter brief clearly indicates a fast transition
 
-**WORD COUNT MANDATE:** This chapter MUST be at least {target_words:,} words. If you finish the beats before reaching this count, you MUST expand by:
-- Adding more dialogue exchanges (characters should have conversations, not monologues)
-- Including detailed sensory descriptions for every scene
-- Showing character internal thoughts and reactions to events
-- Describing settings and atmosphere in detail
-- Breaking moments into smaller beats with pauses and observations
+WORD COUNT MANDATE:
+- Target approximately [WORD_COUNT_TARGET] words
+- If you are ending too early, deepen the active scene with concrete action, dialogue, and interiority rather than padding
 
-**DO NOT** rush through the chapter. Take your time with each scene. Make the reader feel like they are there.
-
-After writing the chapter, output ONLY the chapter text. Do not add any commentary, analysis, or notes.
+After writing the chapter, output ONLY the chapter text.

@@ -8,7 +8,16 @@ import subprocess, sys, os, unittest, json, tempfile, shutil, unittest.mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import get_model, DEFAULT_MODEL
-from paths import CHAPTERS_DIR, CHAPTER_BEATS_TEMPLATE_PATH, PROMPTS_DIR, RAW_OUTPUTS_DIR, TEMPLATES_DIR
+from paths import (
+    CHAPTERS_DIR,
+    CHAPTER_BEATS_TEMPLATE_PATH,
+    DEFAULT_PROJECT_NAME,
+    DEFAULT_PROJECTS_DIR,
+    PROJECT_DIR,
+    PROMPTS_DIR,
+    RAW_OUTPUTS_DIR,
+    TEMPLATES_DIR,
+)
 
 # -------------------------------------------------------------------
 # Mock LLM responses (ASCII-safe)
@@ -106,6 +115,10 @@ class TestProjectStructure(unittest.TestCase):
     def test_support_dirs_exist(self):
         for path in [PROMPTS_DIR, RAW_OUTPUTS_DIR, TEMPLATES_DIR]:
             self.assertTrue(os.path.isdir(path), f"Missing support dir: {path}")
+
+    def test_default_project_dir_is_workspace_scoped(self):
+        expected = os.path.join(DEFAULT_PROJECTS_DIR, DEFAULT_PROJECT_NAME)
+        self.assertEqual(PROJECT_DIR, expected)
 
     def test_beats_template_format(self):
         """Beats template should have required sections."""

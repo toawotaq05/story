@@ -5,15 +5,16 @@ plan_chapters.py — Generate the full chapter outline before writing begins.
 Usage:
   python3 plan_chapters.py                       # interactive: ask for concept or use existing
   python3 plan_chapters.py "my concept"           # one-shot with concept
-  python3 plan_chapters.py --beats               # also generate all chapter beats upfront
+  python3 plan_chapters.py --beats               # also generate all chapter briefs upfront
   python3 plan_chapters.py --beats 8             # 8 chapters (default: 8-12 based on story_bible or auto)
   python3 plan_chapters.py --regen-outline       # regenerate outline only
-  python3 plan_chapters.py --regen-beats        # regenerate all beats from existing outline
+  python3 plan_chapters.py --regen-beats        # regenerate all chapter briefs from existing outline
 """
 import sys
 import os
 import argparse
 
+from chapter_planning import build_chapter_beats_prompt
 from dual_llm import stream_llm
 from config import get_model, get_default_chapters
 from paths import (
@@ -39,13 +40,13 @@ def main():
     parser.add_argument("concept", nargs="?", default=None,
                         help="Story concept (if not given, use existing story_bible.md)")
     parser.add_argument("--beats", action="store_true",
-                        help="Also generate all chapter beats after the outline")
+                        help="Also generate all chapter briefs after the outline")
     parser.add_argument("--chapters", type=int, default=None,
                         help=f"Number of chapters (default: {DEFAULT_CHAPTERS}, range: 8-12)")
     parser.add_argument("--regen-outline", action="store_true",
-                        help="Regenerate outline only, keep existing beats")
+                        help="Regenerate outline only, keep existing chapter briefs")
     parser.add_argument("--regen-beats", action="store_true",
-                        help="Regenerate all beats from existing outline")
+                        help="Regenerate all chapter briefs from existing outline")
     args = parser.parse_args()
 
     story_bible_path = STORY_BIBLE_PATH
@@ -168,7 +169,7 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
         print(f"✓ Chapter outline written to story_bible.md")
         print()
 
-    # --- Optionally generate all chapter beats ---
+    # --- Optionally generate all chapter briefs ---
     if args.beats or args.regen_beats:
         # Load story bible and outline
         with open(story_bible_path) as f:
@@ -185,7 +186,7 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
             print(f"Outline section:\n{outline_section[:500]}")
             sys.exit(1)
 
-        print(f"=== Generating Beats for {len(chapter_entries)} Chapters ===")
+        print(f"=== Generating Chapter Briefs for {len(chapter_entries)} Chapters ===")
         print()
 
         # Load beats template from chapter 1 if it exists AND has actual content
@@ -197,10 +198,6 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
         for entry in chapter_entries:
             ch_num = str(entry.number)
             ch_title = entry.title
-            summary_parts = [entry.summary]
-            if entry.ending:
-                summary_parts.append(f"ends: {entry.ending}")
-            ch_summary = " -> ".join(part for part in summary_parts if part)
             beats_file = chapter_beats_path(ch_num)
             skip_chapter = os.path.exists(beats_file) and not args.regen_beats
             if skip_chapter:
@@ -209,42 +206,16 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
 
             print(f"  Generating Chapter {ch_num} — {ch_title}")
 
-            # Build context: what came before (skip empty beats files)
-            prior_beats = []
-            for prev_entry in chapter_entries:
-                if prev_entry.number >= entry.number:
-                    break
-                prev_file = chapter_beats_path(prev_entry.number)
-                if os.path.exists(prev_file) and os.path.getsize(prev_file) > 50:
-                    with open(prev_file) as f:
-                        prior_beats.append(f"# Chapter {prev_entry.number} — {prev_entry.title}\n{f.read()}")
-
-            prior_context = "\n\n".join(prior_beats) if prior_beats else "(No prior chapters — this is the opening)"
-
             system_prompt = "You are a story architect."
-            # Format template with current chapter details
             current_template = beats_template
             if "{chapter}" in current_template:
                 current_template = current_template.format(chapter=ch_num, title=ch_title)
-
-            user_prompt = f"""Write detailed chapter beats for Chapter {ch_num} of the story.
-
-CHAPTER OUTLINE ENTRY:
-{ch_title} — {ch_summary}
-
-STORY BIBLE (do not change established facts):
-{story_bible_core}
-
-STORY SO FAR (prior chapter beats):
-{prior_context}
-
-{f"CHAPTER BEATS TEMPLATE (follow this exact format):\n{current_template}" if current_template else ""}
-
-INSTRUCTIONS:
-- Follow the format of the template above exactly
-- Be specific: name characters, describe scenes, give dialogue cues
-- Plant threads that pay off in later chapters
-- Do not include any preamble or commentary — output only the beats document"""
+            user_prompt = build_chapter_beats_prompt(
+                story_bible_core,
+                ch_num,
+                cumulative_summary="",
+                beats_template=current_template,
+            )
 
             beats_content = stream_llm(user_prompt, model=get_model("beats"), system=system_prompt)
             print()
@@ -261,7 +232,7 @@ INSTRUCTIONS:
             print(f"  ✓ chapter_{ch_num}_beats.md written")
 
         print()
-        print(f"✓ All chapter beats generated")
+        print(f"✓ All chapter briefs generated")
         print()
         print("Ready to write! Run:")
         print("  python3 generate_chapter.py 1")
@@ -269,11 +240,11 @@ INSTRUCTIONS:
     else:
         print("Chapter outline generated.")
         print()
-        print("To review the outline, open: story_bible.md")
+        print(f"To review the outline, open: {story_bible_path}")
         print()
         print("Next steps:")
-        print("  python3 plan_chapters.py --beats          # generate all chapter beats")
-        print("  python3 plan_chapters.py --beats --regen-beats  # regenerate all beats")
+        print("  python3 plan_chapters.py --beats          # generate all chapter briefs")
+        print("  python3 plan_chapters.py --beats --regen-beats  # regenerate all chapter briefs")
 
 if __name__ == "__main__":
     main()

@@ -205,3 +205,13 @@ def upsert_chapter_summary(summary_content, chapter_number, summary_block):
     else:
         updated = summary_content.rstrip() + "\n\n" + replacement
     return updated.rstrip() + "\n"
+
+
+def build_initial_cumulative_summary(total_chapters, target_word_count):
+    return (
+        "# Cumulative Story Summary\n\n"
+        "## Overview\n\n"
+        f"- Total chapters: {int(total_chapters)}\n"
+        f"- Target word count: {int(target_word_count):,}\n"
+        "- **Completed Chapters:** 0\n"
+    )

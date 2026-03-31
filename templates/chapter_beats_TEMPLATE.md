@@ -1,13 +1,13 @@
 # Chapter 1 — [CHAPTER TITLE]
 
 ### Beat 1: [Hook/Opening]
-[Describe the opening scene, introduce protagonist and setting, establish the initial situation and tone.]
+[Describe the opening movement. Ground the setting, whose attention dominates the chapter, and what is unstable from the first page.]
 
 ### Beat 2: [Inciting Incident/Development]
-[Describe the inciting incident that propels the story forward, the initial conflict or challenge that sets the plot in motion.]
+[Describe the development that pushes the chapter into active conflict. Include what changes, what pressure rises, and what decision or reaction matters.]
 
 ### Beat 3: [Midpoint/Rising Action]
-[Describe the midpoint or rising action, where stakes increase, complications arise, and characters face deeper challenges.]
+[Describe the escalation. Include reversals, new information, emotional turns, or a sharper complication that changes the chapter's direction.]
 
 ### Beat 4: [Climax/Resolution]
-[Describe the climax of the chapter, the resolution of the immediate conflict, and any cliffhanger or setup for the next chapter.]
+[Describe the chapter-ending payoff. Include the decisive action or realization, the emotional landing, and the handoff into the next chapter.]

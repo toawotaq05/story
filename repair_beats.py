@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-repair_beats.py — Validate and repair malformed chapter beats files.
+repair_beats.py — Validate and repair malformed chapter brief files.
 
 Usage:
   python3 repair_beats.py <chapter_number>   # repair specific chapter
@@ -12,6 +12,7 @@ import sys
 import re
 import argparse
 
+from chapter_planning import build_chapter_beats_prompt
 from dual_llm import stream_llm
 from config import get_model
 from paths import (
@@ -68,49 +69,15 @@ def regenerate_beats(chapter, force=False):
         with open(CUMULATIVE_SUMMARY_PATH) as f:
             cumulative_content = f.read()
 
-    if chapter_str == "1":
-        with open(CHAPTER_BEATS_TEMPLATE_PATH) as f:
-            beats_template = f.read()
-        system_prompt = "You are a story architect."
-        user_prompt = f"""Based on the story bible below, write detailed beats for Chapter 1.
-
-STORY BIBLE:
-{story_bible}
-
-INSTRUCTIONS:
-- Create a compelling opening chapter that establishes the story world, main characters, and central conflict.
-- Follow this exact format:
-
-{beats_template}
-
-Do not include any preamble or commentary. Output only the beats document."""
-    else:
-        prev_chapter_str = str(int(chapter) - 1)
-        prev_beats_path = chapter_beats_path(prev_chapter_str)
-        if not os.path.exists(prev_beats_path):
-            print(f"ERROR: Previous chapter beats not found: {prev_beats_path}")
-            return False
-        with open(prev_beats_path) as f:
-            beats_format = f.read()
-
-        system_prompt = "You are a story architect."
-        user_prompt = f"""Based on the story so far, write detailed beats for Chapter {chapter_str}.
-
-STORY BIBLE (do not change these established facts):
-{story_bible}
-
-STORY SO FAR (cumulative summary):
-{cumulative_content}
-
-CHAPTER {chapter_str} BEATS TEMPLATE (follow this format exactly):
-{beats_format}
-
-INSTRUCTIONS:
-- Continue the story from where Chapter {prev_chapter_str} left off
-- Follow the same level of detail and structure as the template above
-- Be specific: name characters, describe scenes, give dialogue cues
-- Plant seeds for future chapters in "Open Threads / Loose Ends"
-- Do not include any preamble or commentary — output only the beats document"""
+    with open(CHAPTER_BEATS_TEMPLATE_PATH) as f:
+        beats_template = f.read()
+    system_prompt = "You are a story architect."
+    user_prompt = build_chapter_beats_prompt(
+        story_bible,
+        chapter_str,
+        cumulative_summary=cumulative_content,
+        beats_template=beats_template,
+    )
 
     print(f"[{chapter_str}] Generating beats...")
     content = stream_llm(user_prompt, model=get_model("beats"), system=system_prompt, silent=False)
@@ -136,7 +103,7 @@ INSTRUCTIONS:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Repair malformed chapter beats files")
+    parser = argparse.ArgumentParser(description="Repair malformed chapter brief files")
     parser.add_argument("chapter", nargs="?", help="Chapter number to repair")
     parser.add_argument("--all", action="store_true", help="Check all chapters and regenerate malformed ones")
     parser.add_argument("--force", action="store_true", help="Force regeneration even if file is valid")

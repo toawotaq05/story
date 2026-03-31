@@ -18,6 +18,7 @@ def main():
     print("STORY PIPELINE STATUS")
     print("=" * 50)
     print(f"Project dir: {PROJECT_DIR}")
+    print(f"Chapters dir: {chapters_dir}")
     print()
 
     # --- Story bible ---

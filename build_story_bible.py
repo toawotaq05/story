@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 """
-build_story_bible.py — End-to-end story bible + chapter 1 beats generator.
-
-For local/small models: does story bible first, then chapter beats as a
-separate LLM call (avoids context overflow). For remote/powerful models:
-does both in one call with the marker separator.
+build_story_bible.py — End-to-end story bible + chapter 1 brief generator.
 
 Usage:
   python3 build_story_bible.py "Your story concept here"
@@ -12,6 +8,7 @@ Usage:
 import sys
 import os
 
+from chapter_planning import build_chapter_beats_prompt
 from dual_llm import stream_llm
 from config import get_default_chapters, get_word_count_target, is_local_mode
 from paths import (
@@ -23,6 +20,7 @@ from paths import (
     ensure_runtime_dirs,
     raw_output_path,
 )
+from story_utils import build_initial_cumulative_summary
 
 
 def main():
@@ -113,45 +111,22 @@ Do not include any preamble, commentary, or explanation — output only the comp
     # Initialize cumulative_summary.md if it doesn't exist
     if not os.path.exists(CUMULATIVE_SUMMARY_PATH):
         with open(CUMULATIVE_SUMMARY_PATH, "w") as f:
-            f.write("# Cumulative Story Summary\n\n")
-            f.write(f"## Overview\n\n")
-            f.write(f"- Total chapters: {default_chapters}\n")
-            f.write(f"- Target word count: {word_count_target:,}\n")
-            f.write(f"- **Completed Chapters:** 0\n")
+            f.write(build_initial_cumulative_summary(default_chapters, word_count_target))
         print("✓ cumulative_summary.md initialized")
 
     # ----------------------------------------------------------------
     # TASK 2: Generate Chapter 1 Beats (separate call — safer for small models)
     # ----------------------------------------------------------------
-    beats_prompt = f"""Based on the story bible below, write detailed chapter 1 beats.
-
-STORY BIBLE:
-{story_bible_content}
-
----
-
-TASK: Write CHAPTER 1 BEATS
-
-Using the story bible above, write detailed chapter 1 beats. Follow the template exactly:
-- Opening scene: set the stage
-- Key events: 3-5 beats in chronological order
-- Turning point/cliffhanger
-- Character beats for each main character
-- Themes/threads
-
-Chapter 1 Beats Template:
-{chapter_template}
-
-OUTPUT FORMAT:
-
-Write the chapter 1 beats section starting with "# Chapter 1 — [YOUR CHAPTER TITLE]", replacing all bracketed placeholders with specific details from the story bible.
-
-Do not include any preamble or commentary — output only the beats document.
-"""
+    beats_prompt = build_chapter_beats_prompt(
+        story_bible_content,
+        1,
+        cumulative_summary="",
+        beats_template=chapter_template,
+    )
 
     beats_system = (
-        "You are a story architect. Write specific, detailed chapter beats that "
-        "another LLM could use to write the full chapter. Name characters, describe "
+        "You are a story architect. Write a specific, detailed chapter brief that "
+        "another LLM could use to draft the full chapter. Name characters, describe "
         "scenes, give dialogue cues. Do not summarise — be vivid and concrete."
     )
 
@@ -178,8 +153,8 @@ Do not include any preamble or commentary — output only the beats document.
     print()
     print("=== Done ===")
     print("Next steps:")
-    print("  1. Review story_bible.md")
-    print("  2. Review chapters/chapter_1_beats.md")
+    print(f"  1. Review {STORY_BIBLE_PATH}")
+    print(f"  2. Review {chapter_beats_path(1)}")
     print("  3. python3 generate_chapter.py 1")
 
 
