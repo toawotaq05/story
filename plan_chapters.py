@@ -26,6 +26,7 @@ from paths import (
     raw_output_path,
 )
 from story_utils import (
+    analyze_beats_document,
     build_outline_section,
     is_valid_beats_document,
     merge_story_bible_and_outline,
@@ -220,9 +221,29 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
             beats_content = stream_llm(user_prompt, model=get_model("beats"), system=system_prompt)
             print()
 
-            # Validate: beats should start with "# Chapter", not the story bible or garbage
-            if not is_valid_beats_document(beats_content):
-                print(f"  ⚠ WARNING: Generated beats for Chapter {ch_num} look wrong (starts with: {beats_content.strip()[:80]!r})")
+            issues = analyze_beats_document(beats_content)
+            if issues:
+                repair_prompt = (
+                    f"Rewrite this chapter brief so it is clean and draftable for Chapter {ch_num}.\n\n"
+                    f"ISSUES TO FIX:\n" + "\n".join(f"- {issue}" for issue in issues) + "\n\n"
+                    "REQUIREMENTS:\n"
+                    "- Keep the same planned chapter events and ending direction\n"
+                    "- Output only the chapter brief document\n"
+                    "- Use 4-6 concrete, distinct beat sections\n"
+                    "- Remove placeholders, duplicated beats, and vague filler\n\n"
+                    f"CURRENT BRIEF:\n{beats_content}"
+                )
+                beats_content = stream_llm(
+                    repair_prompt,
+                    model=get_model("beats"),
+                    system="You repair malformed chapter briefs into clean drafting plans.",
+                )
+                print()
+                issues = analyze_beats_document(beats_content)
+
+            if issues:
+                print(f"  ⚠ WARNING: Generated beats for Chapter {ch_num} still look wrong")
+                print(f"  ⚠ Issues: {'; '.join(issues[:3])}")
                 print(f"  ⚠ NOT writing chapter_{ch_num}_beats.md — run with --regen-beats to retry")
                 print(f"  ⚠ If this persists, check if local LLM context window is too small")
                 continue

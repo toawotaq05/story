@@ -16,6 +16,7 @@ from datetime import datetime
 
 from chapter_planning import (
     build_chapter_beats_prompt,
+    build_chapter_cleanup_prompt,
     build_chapter_revision_prompt,
     build_scene_block_prompt,
     find_chapter_entry,
@@ -36,6 +37,7 @@ from paths import (
     ensure_runtime_dirs,
 )
 from story_utils import (
+    analyze_beats_document,
     build_initial_cumulative_summary,
     group_beats_into_blocks,
     has_summary_for_chapter,
@@ -44,6 +46,12 @@ from story_utils import (
 )
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CHAPTER_MIN_RATIO = 0.8
+CHAPTER_MAX_RATIO = 1.2
+META_NARRATION_PATTERNS = [
+    re.compile(r"\bthe chapter (?:ends|ended|concludes|concluded)\b", re.IGNORECASE),
+    re.compile(r"\bthis chapter\b", re.IGNORECASE),
+]
 
 
 def parse_story_bible(content):
@@ -105,6 +113,106 @@ def tail_text(text, word_limit=120):
     if len(words) <= word_limit:
         return text.strip()
     return "..." + " ".join(words[-word_limit:]).strip()
+
+
+def normalized_paragraphs(text):
+    paragraphs = []
+    for raw in re.split(r"\n\s*\n", text.strip()):
+        cleaned = " ".join(raw.split())
+        if not cleaned:
+            continue
+        normalized = re.sub(r"[^a-z0-9\s]", "", cleaned.lower())
+        normalized = " ".join(normalized.split())
+        if len(normalized.split()) >= 20:
+            paragraphs.append(normalized)
+    return paragraphs
+
+
+def find_quality_issues(text, target_words_total):
+    issues = []
+    word_count = len(text.split())
+    min_words = max(int(target_words_total * CHAPTER_MIN_RATIO), 1)
+    max_words = max(int(target_words_total * CHAPTER_MAX_RATIO), min_words)
+
+    if word_count < min_words:
+        issues.append(
+            f"Too short: {word_count:,} words. Expand to at least {min_words:,} words."
+        )
+    if word_count > max_words:
+        issues.append(
+            f"Too long: {word_count:,} words. Compress to at most {max_words:,} words."
+        )
+
+    for pattern in META_NARRATION_PATTERNS:
+        if pattern.search(text):
+            issues.append("Contains meta narration about the chapter instead of in-scene prose.")
+            break
+
+    seen = set()
+    duplicate_count = 0
+    for paragraph in normalized_paragraphs(text):
+        if paragraph in seen:
+            duplicate_count += 1
+        else:
+            seen.add(paragraph)
+    if duplicate_count:
+        issues.append(
+            f"Contains repeated long paragraph material ({duplicate_count} repeated section(s))."
+        )
+
+    return issues
+
+
+def clean_chapter_text(
+    chapter_text,
+    story_bible_text,
+    cumulative_content,
+    chapter_beats_text,
+    prepared_system_prompt,
+    chapter,
+    target_words_total,
+    silent=False,
+):
+    min_words = max(int(target_words_total * CHAPTER_MIN_RATIO), 1)
+    max_words = max(int(target_words_total * CHAPTER_MAX_RATIO), min_words)
+
+    current_text = chapter_text
+    passes = []
+    for _ in range(2):
+        issues = find_quality_issues(current_text, target_words_total)
+        if not issues:
+            return current_text, passes
+
+        passes.append(
+            {
+                "issues": issues,
+                "word_count_before": len(current_text.split()),
+            }
+        )
+        cleanup_prompt = build_chapter_cleanup_prompt(
+            story_bible_text,
+            cumulative_content,
+            chapter_beats_text,
+            prepared_system_prompt,
+            chapter,
+            current_text,
+            target_words_total,
+            min_words,
+            max_words,
+            issues,
+        )
+        cleanup_max_words = min(max_words + 400, 12000)
+        current_text = stream_llm(
+            cleanup_prompt,
+            model=get_model("write"),
+            system="",
+            silent=silent,
+            max_words=cleanup_max_words,
+            loop_detection=True,
+        )
+        passes[-1]["word_count_after"] = len(current_text.split())
+
+    return current_text, passes
 
 
 def generate_chapter(chapter, script_dir, silent=False, output_file=None, beats_per_block=2, revise=True):
@@ -213,6 +321,17 @@ def generate_chapter(chapter, script_dir, silent=False, output_file=None, beats_
     else:
         chapter_text = assembled_text
 
+    chapter_text, cleanup_passes = clean_chapter_text(
+        chapter_text,
+        story_bible_text,
+        cumulative_content,
+        chapter_beats_text,
+        prepared_system_prompt,
+        chapter,
+        target_words_total,
+        silent=silent,
+    )
+
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     metadata = (
         f"# Chapter {chapter} Draft\n"
@@ -241,9 +360,17 @@ def generate_chapter(chapter, script_dir, silent=False, output_file=None, beats_
             f"Blocks: {len(blocks)}\n"
             f"Block word counts: {', '.join(str(count) for count in block_word_counts)}\n"
             f"Revision pass: {'yes' if revise else 'no'}\n"
+            f"Cleanup passes: {len(cleanup_passes)}\n"
             f"Brief file: {os.path.basename(chapter_brief)}\n"
             f"Draft file: {os.path.basename(output_path)}\n"
         )
+        for index, cleanup in enumerate(cleanup_passes, start=1):
+            f.write(
+                f"\nCleanup pass {index}: {cleanup['word_count_before']:,} -> "
+                f"{cleanup.get('word_count_after', cleanup['word_count_before']):,} words\n"
+            )
+            for issue in cleanup["issues"]:
+                f.write(f"- {issue}\n")
 
     return len(chapter_text.split()), output_path
 
@@ -282,8 +409,31 @@ def generate_next_chapter_beats(chapter):
             file=sys.stderr,
         )
         return None
-    if not is_valid_beats_document(content):
-        print("  ERROR: Generated chapter brief did not match expected format", file=sys.stderr)
+    issues = analyze_beats_document(content)
+    if issues:
+        repair_prompt = (
+            f"Rewrite this chapter brief so it is immediately usable for drafting.\n\n"
+            f"ISSUES TO FIX:\n" + "\n".join(f"- {issue}" for issue in issues) + "\n\n"
+            "REQUIREMENTS:\n"
+            "- Keep the same chapter intent and story events\n"
+            "- Output a single chapter brief only\n"
+            "- Use a chapter heading followed by 4-6 concrete beat sections\n"
+            "- Each beat must be specific, distinct, and prose-draftable\n"
+            "- Remove placeholders, vague filler, and duplicated beats\n\n"
+            f"CURRENT BRIEF:\n{content}"
+        )
+        content = stream_llm(
+            repair_prompt,
+            model=get_model("beats"),
+            system="You repair malformed chapter briefs into clean drafting plans.",
+        )
+        issues = analyze_beats_document(content)
+    if issues:
+        print(
+            "  ERROR: Generated chapter brief did not match expected quality: "
+            + "; ".join(issues[:3]),
+            file=sys.stderr,
+        )
         return None
 
     with open(next_beats, "w") as f:

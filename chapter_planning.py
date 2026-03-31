@@ -299,3 +299,55 @@ REVISION INSTRUCTIONS:
 
 Output ONLY the revised chapter text.
 """
+
+
+def build_chapter_cleanup_prompt(
+    story_bible_text,
+    cumulative_summary,
+    chapter_beats_text,
+    system_prompt,
+    chapter_number,
+    chapter_text,
+    target_words,
+    min_words,
+    max_words,
+    issues,
+):
+    entry = find_chapter_entry(story_bible_text, chapter_number)
+    chapter_label = (
+        f"Chapter {entry.number} — {entry.title}" if entry else f"Chapter {chapter_number}"
+    )
+    issues_text = "\n".join(f"- {issue}" for issue in issues) or "- General cleanup"
+
+    return f"""{system_prompt}
+
+STORY BIBLE:
+{story_bible_text}
+
+CURRENT STORY CONTEXT:
+{cumulative_summary}
+
+CHAPTER BRIEF FOR {chapter_label}:
+{chapter_beats_text}
+
+CURRENT CHAPTER DRAFT:
+{chapter_text}
+
+TARGET BAND:
+- Ideal target: about {target_words:,} words
+- Acceptable range: {min_words:,}-{max_words:,} words
+
+ISSUES TO FIX:
+{issues_text}
+
+CLEANUP INSTRUCTIONS:
+- Keep the same core events, order, character turns, and ending
+- Rewrite into clean final prose, not notes or summary
+- Remove repeated beats, repeated paragraphs, and repeated emotional conclusions
+- Replace meta narration such as "the chapter ends/concludes" with in-scene storytelling
+- If the draft is too long, compress by cutting repetition and summary-like padding first
+- If the draft is too short, expand active scenes with concrete action, dialogue, and interiority
+- Land inside the acceptable range unless a very small miss is unavoidable
+
+Output ONLY the cleaned chapter text.
+"""

@@ -30,9 +30,11 @@ If you do nothing, the active project defaults to `workspace/default/`.
 2. `plan_chapters.py --beats` fills or refreshes the chapter outline and generates chapter briefs for every planned chapter.
 3. `generate_chapter.py N` writes one coherent chapter draft from the story bible, cumulative summary, and `chapter_N_beats.md`.
 4. `summarize_chapter.py N` records story state and generates the next chapter brief if needed.
-5. `compile.py` assembles drafted chapters into `book.md`.
+5. `compile.py` assembles drafted chapters into `book.md` and, when `pandoc` is available, `book.epub`.
 
 The `.md` files under `chapters/` still use the `chapter_N_beats.md` name, but they now act as chapter briefs, not rigid scene-by-scene expansion contracts.
+
+Chapter briefs are validated before use. If a generated brief is structurally valid but obviously weak, the pipeline allows one repair pass rather than looping indefinitely.
 
 ## Why The Strategy Changed
 
@@ -57,6 +59,7 @@ python3 generate_chapter.py 1
 python3 summarize_chapter.py 1
 python3 status.py
 python3 compile.py --dry-run
+python3 compile.py --project-dir /abs/path/to/project
 ```
 
 Drafting controls:
@@ -72,11 +75,32 @@ Generate all sequentially:
 python3 generate_chapter.py --all
 ```
 
+Compile outputs:
+
+```sh
+python3 compile.py
+python3 compile.py --project-dir /abs/path/to/project
+python3 compile.py --project-dir /abs/path/to/project --output /abs/path/to/book.md
+```
+
+Notes:
+
+- `compile.py` reads drafts from the active project by default
+- `--output` controls where the compiled Markdown is written; if you pass a directory, it writes `book.md` inside it
+- If `pandoc` is installed on `PATH`, the compiler also writes a sibling `.epub`
+
 That workflow now means:
 
 1. draft chapter
 2. summarize it
 3. generate the next chapter brief if missing
+
+## Quality Guardrails
+
+- Chapter drafts target roughly 80%-120% of the configured per-chapter word count
+- Final chapter cleanup checks for major length drift, repeated long sections, and meta-summary phrasing
+- Chapter brief generation uses a single bounded repair attempt when the first output is malformed or too weak to draft from directly
+- The pipeline does not retry indefinitely if the model keeps missing the target
 
 ## Important Files
 

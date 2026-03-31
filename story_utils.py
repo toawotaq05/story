@@ -11,8 +11,10 @@ SUMMARY_HEADER_RE = re.compile(r"(?mi)^###\s+Chapter\s+(\d+)\s*[—-]\s*(.+?)\s*
 OUTLINE_LINE_RE = re.compile(r"^\s*(\d+)\.\s+\*\*(.+?)\*\*\s*(.*)$")
 CHAPTER_LABEL_RE = re.compile(r"(?i)^chapter\s+(\d+)\s*[-—–:]\s*(.+)$")
 ENDS_SPLIT_RE = re.compile(r"\s*(?:→|->|>)\s*ends?:\s*", re.IGNORECASE)
-CHAPTER_HEADING_RE = re.compile(r"(?m)^#\s+Chapter\s+\d+\s*[:—\-]")
-BEAT_HEADING_RE = re.compile(r"^###\s+Beat\s+(\d+):", re.MULTILINE)
+CHAPTER_HEADING_RE = re.compile(r"(?m)^#\s+Chapter(?:\s+Brief)?(?:\s+for)?\s+\d+\s*[:—\-]")
+BEAT_HEADING_RE = re.compile(
+    r"(?im)^#{2,6}\s+\*{0,2}Beat\s+(\d+)\*{0,2}\s*(?:[:\-—]|$)"
+)
 
 
 @dataclass(frozen=True)
@@ -153,7 +155,11 @@ def parse_beats(beats_content):
     current_beat = None
     current_text = []
     for line in lines:
-        match = re.match(r"^### Beat (\d+):", line.strip())
+        match = re.match(
+            r"^#{2,6}\s+\*{0,2}Beat\s+(\d+)\*{0,2}\s*(?:[:\-—]|$)",
+            line.strip(),
+            re.IGNORECASE,
+        )
         if match:
             if current_beat is not None:
                 beats.append((current_beat, "\n".join(current_text).strip()))
@@ -190,6 +196,36 @@ def is_valid_beats_document(content, min_beats=2):
     if not content or not content.strip().startswith("# Chapter"):
         return False
     return len(parse_beats(content)) >= min_beats
+
+
+def analyze_beats_document(content, min_beats=3):
+    issues = []
+    if not content or not content.strip().startswith("# Chapter"):
+        issues.append("Document must start with a chapter heading.")
+        return issues
+
+    beats = parse_beats(content)
+    if len(beats) < min_beats:
+        issues.append(f"Expected at least {min_beats} beats, found {len(beats)}.")
+        return issues
+
+    numbers = [number for number, _ in beats]
+    expected = list(range(1, len(beats) + 1))
+    if numbers != expected:
+        issues.append(f"Beat numbers must be sequential starting at 1, found {numbers}.")
+
+    seen = set()
+    for number, beat_text in beats:
+        normalized = " ".join(beat_text.lower().split())
+        if "[" in beat_text or "]" in beat_text:
+            issues.append(f"Beat {number} still contains placeholder-style brackets.")
+        if len(beat_text.split()) < 20:
+            issues.append(f"Beat {number} is too thin to draft from directly.")
+        if normalized in seen:
+            issues.append(f"Beat {number} repeats an earlier beat too closely.")
+        seen.add(normalized)
+
+    return issues
 
 
 def parse_completed_chapters(summary_content):

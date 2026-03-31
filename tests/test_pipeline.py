@@ -15,6 +15,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import chapter_planning
+import compile as compile_module
 import generate_chapter as generate_chapter_module
 import story_utils
 from config import DEFAULT_MODEL, get_model
@@ -150,6 +151,32 @@ class TestStoryUtils(unittest.TestCase):
         self.assertEqual(blocks[1]["start_beat"], 3)
         self.assertEqual(blocks[1]["end_beat"], 4)
 
+    def test_parse_beats_accepts_level_two_headings(self):
+        brief = """# Chapter Brief — Test
+
+## Beat 1: Arrival
+First movement.
+
+## Beat 2: Pressure
+Second movement.
+"""
+        beats = story_utils.parse_beats(brief)
+        self.assertEqual(len(beats), 2)
+        self.assertEqual(beats[0][0], 1)
+        self.assertIn("First movement.", beats[0][1])
+
+    def test_parse_beats_accepts_bold_and_dash_variants(self):
+        brief = """# Chapter Brief — Test
+
+#### **Beat 1** - Arrival
+First movement.
+
+### Beat 2 — Pressure
+Second movement.
+"""
+        beats = story_utils.parse_beats(brief)
+        self.assertEqual([number for number, _ in beats], [1, 2])
+
     def test_upsert_chapter_summary_replaces_existing_block(self):
         original = (
             SAMPLE_SUMMARY
@@ -164,6 +191,22 @@ class TestStoryUtils(unittest.TestCase):
         self.assertIn("### Chapter 1 — New Title", updated)
         self.assertNotIn("Old summary text.", updated)
         self.assertIn("### Chapter 2 — Another", updated)
+
+    def test_analyze_beats_document_flags_placeholders_and_duplicates(self):
+        brief = """# Chapter Brief — Test
+
+### Beat 1: Arrival
+[Placeholder words]
+
+### Beat 2: Arrival
+[Placeholder words]
+
+### Beat 3: Exit
+Short note.
+"""
+        issues = story_utils.analyze_beats_document(brief)
+        self.assertTrue(issues)
+        self.assertTrue(any("placeholder" in issue.lower() for issue in issues))
 
 
 class TestChapterPlanning(unittest.TestCase):
@@ -295,6 +338,8 @@ class TestGenerateChapterFlow(TempWorkspaceCase):
         ]
 
         with self.patch_generate_chapter_paths(), patch.object(
+            generate_chapter_module, "clean_chapter_text", side_effect=lambda text, *args, **kwargs: (text, [])
+        ), patch.object(
             generate_chapter_module, "stream_llm", side_effect=outputs
         ) as mock_stream:
             word_count, output_path = generate_chapter_module.generate_chapter(
@@ -326,6 +371,10 @@ class TestGenerateChapterFlow(TempWorkspaceCase):
         ]
 
         with self.patch_generate_chapter_paths(), patch.object(
+            generate_chapter_module, "prepare_system_prompt", return_value=("SYSTEM", 50)
+        ), patch.object(
+            generate_chapter_module, "clean_chapter_text", side_effect=lambda text, *args, **kwargs: (text, [])
+        ), patch.object(
             generate_chapter_module, "stream_llm", side_effect=outputs
         ) as mock_stream:
             _, _ = generate_chapter_module.generate_chapter(
@@ -342,11 +391,48 @@ class TestGenerateChapterFlow(TempWorkspaceCase):
         self.assertIn("First block prose.", draft)
         self.assertIn("Second block prose.", draft)
 
+    def test_generate_chapter_runs_cleanup_when_revision_is_out_of_range(self):
+        outputs = [
+            "Block one prose with setup.",
+            "Block two prose with payoff.",
+            "Too short.",
+            (
+                "Expanded final prose carries concrete action, dialogue, memory, and interiority. "
+                "Elara crosses the room, answers Finn, studies the bottle, and commits to the next step. "
+                "She pauses at the window, hears the surf, speaks aloud, and chooses action with "
+                "specific movement, feeling, and consequence on the page."
+            ),
+        ]
+
+        with self.patch_generate_chapter_paths(), patch.object(
+            generate_chapter_module, "prepare_system_prompt", return_value=("SYSTEM", 50)
+        ), patch.object(
+            generate_chapter_module, "stream_llm", side_effect=outputs
+        ) as mock_stream:
+            _, _ = generate_chapter_module.generate_chapter(
+                1,
+                self.temp_dir,
+                silent=True,
+                beats_per_block=2,
+                revise=True,
+            )
+
+        self.assertEqual(mock_stream.call_count, 4)
+        with open(self.log_path) as handle:
+            log = handle.read()
+        self.assertIn("Cleanup passes: 1", log)
+        self.assertIn("Too short:", log)
+
     def test_generate_next_chapter_beats_writes_next_brief(self):
         with self.patch_generate_chapter_paths(), patch.object(
             generate_chapter_module,
             "stream_llm",
-            return_value="# Chapter 2 — The Return\n\n### Beat 1: Arrival\nx\n\n### Beat 2: Unease\ny\n",
+            return_value=(
+                "# Chapter 2 — The Return\n\n"
+                "### Beat 1: Arrival\nMara returns home, studies the greenhouse door, notices the bolt set from inside, and realizes nobody should be there at this hour.\n\n"
+                "### Beat 2: Unease\nShe circles the house, hears movement after midnight, checks the dark windows twice, and starts doubting whether fear is distorting her senses.\n\n"
+                "### Beat 3: Decision\nShe decides to investigate before dawn rather than wait for help, because hesitation is making the locked greenhouse feel even more threatening.\n"
+            ),
         ):
             created = generate_chapter_module.generate_next_chapter_beats(1)
 
@@ -354,6 +440,56 @@ class TestGenerateChapterFlow(TempWorkspaceCase):
         with open(self.chapter_2_brief_path) as handle:
             content = handle.read()
         self.assertIn("# Chapter 2 — The Return", content)
+
+    def test_generate_next_chapter_beats_repairs_low_quality_brief_once(self):
+        outputs = [
+            "# Chapter 2 — The Return\n\n### Beat 1: Arrival\n[TODO]\n\n### Beat 2: Arrival\n[TODO]\n",
+            (
+                "# Chapter 2 — The Return\n\n"
+                "### Beat 1: Arrival\nMara returns home, studies the greenhouse, notices it is locked from inside, and feels immediate dread because nobody should have access.\n\n"
+                "### Beat 2: Unease\nShe hears movement after midnight, checks the windows, retraces her steps through the yard, and doubts her own senses as tension keeps building.\n\n"
+                "### Beat 3: Decision\nShe chooses to investigate before dawn, despite fear, because waiting will only worsen the dread and leave the mystery controlling her.\n"
+            ),
+        ]
+        with self.patch_generate_chapter_paths(), patch.object(
+            generate_chapter_module, "stream_llm", side_effect=outputs
+        ):
+            created = generate_chapter_module.generate_next_chapter_beats(1)
+
+        self.assertEqual(created, self.chapter_2_brief_path)
+        with open(self.chapter_2_brief_path) as handle:
+            content = handle.read()
+        self.assertIn("### Beat 3: Decision", content)
+
+
+class TestCompile(unittest.TestCase):
+    def setUp(self):
+        self.project_dir = tempfile.mkdtemp()
+        self.chapters_dir = os.path.join(self.project_dir, "chapters")
+        os.makedirs(self.chapters_dir, exist_ok=True)
+        with open(os.path.join(self.project_dir, "story_bible.md"), "w") as handle:
+            handle.write(SAMPLE_STORY_BIBLE)
+        with open(os.path.join(self.chapters_dir, "chapter_1_draft.txt"), "w") as handle:
+            handle.write("Chapter one prose.")
+        with open(os.path.join(self.chapters_dir, "chapter_2_draft.txt"), "w") as handle:
+            handle.write("Chapter two prose.")
+
+    def tearDown(self):
+        shutil.rmtree(self.project_dir, ignore_errors=True)
+
+    def test_compile_book_writes_markdown_for_explicit_project(self):
+        output_dir = tempfile.mkdtemp()
+        try:
+            with patch.object(compile_module, "write_epub", return_value=(False, "pandoc not found")):
+                compile_module.compile_book(project_dir=self.project_dir, output_path=output_dir, dry_run=False)
+            md_path = os.path.join(output_dir, "book.md")
+            self.assertTrue(os.path.exists(md_path))
+            with open(md_path) as handle:
+                content = handle.read()
+            self.assertIn("# The Silent Garden", content)
+            self.assertIn("## Chapter 1: The Letter", content)
+        finally:
+            shutil.rmtree(output_dir, ignore_errors=True)
 
 
 class TestCLIWithTempProject(unittest.TestCase):
