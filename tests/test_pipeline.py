@@ -20,6 +20,7 @@ import story_utils
 from config import DEFAULT_MODEL, get_model
 from paths import (
     CHAPTER_BEATS_TEMPLATE_PATH,
+    CURRENT_PROJECT_FILE,
     DEFAULT_PROJECT_NAME,
     DEFAULT_PROJECTS_DIR,
     PROJECT_DIR,
@@ -106,6 +107,7 @@ class TestProjectStructure(unittest.TestCase):
             "status.py",
             "config.py",
             "chapter_planning.py",
+            "project.py",
         ]:
             self.assertTrue(os.path.exists(os.path.join(self.root, script)), f"Missing: {script}")
 
@@ -359,10 +361,64 @@ class TestCLIWithTempProject(unittest.TestCase):
         self.assertIn("no chapter beats found", result.stdout.lower() + result.stderr.lower())
 
     def test_help_commands_are_stable(self):
-        for script in ["plan_chapters.py", "generate_chapter.py"]:
+        for script in ["plan_chapters.py", "generate_chapter.py", "project.py"]:
             result = self.run_cli(script, "--help")
             self.assertEqual(result.returncode, 0)
             self.assertIn("usage:", result.stdout.lower())
+
+
+class TestProjectManagerCLI(unittest.TestCase):
+    def setUp(self):
+        self.root = ROOT_DIR
+        self.temp_home = tempfile.mkdtemp()
+        self.temp_projects_dir = os.path.join(self.temp_home, "workspace")
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_home, ignore_errors=True)
+
+    def run_project(self, *args):
+        env = os.environ.copy()
+        env["PYTHONPATH"] = self.root
+        command = [
+            "python3",
+            "-c",
+            (
+                "import os, runpy, sys; "
+                "sys.path.insert(0, os.environ['PYTHONPATH']); "
+                "import paths; "
+                f"paths.DEFAULT_PROJECTS_DIR = {self.temp_projects_dir!r}; "
+                f"paths.CURRENT_PROJECT_FILE = {os.path.join(self.temp_projects_dir, '.current_project')!r}; "
+                "sys.argv = ['project.py'] + sys.argv[1:]; "
+                f"runpy.run_path({os.path.join(self.root, 'project.py')!r}, run_name='__main__')"
+            ),
+            *args,
+        ]
+        return subprocess.run(command, capture_output=True, text=True, cwd=self.root, env=env)
+
+    def test_init_creates_and_switches_project(self):
+        result = self.run_project("init", "novel_one")
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue(os.path.isdir(os.path.join(self.temp_projects_dir, "novel_one")))
+        with open(os.path.join(self.temp_projects_dir, ".current_project")) as handle:
+            self.assertEqual(handle.read().strip(), "novel_one")
+
+    def test_use_switches_existing_project(self):
+        os.makedirs(os.path.join(self.temp_projects_dir, "one"), exist_ok=True)
+        os.makedirs(os.path.join(self.temp_projects_dir, "two"), exist_ok=True)
+        self.run_project("init", "one")
+        result = self.run_project("use", "two")
+        self.assertEqual(result.returncode, 0)
+        with open(os.path.join(self.temp_projects_dir, ".current_project")) as handle:
+            self.assertEqual(handle.read().strip(), "two")
+
+    def test_list_marks_current_project(self):
+        self.run_project("init", "alpha")
+        self.run_project("init", "beta")
+        self.run_project("use", "alpha")
+        result = self.run_project("list")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("* alpha", result.stdout)
+        self.assertIn("beta", result.stdout)
 
 
 class TestErrorPaths(unittest.TestCase):

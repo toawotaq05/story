@@ -6,12 +6,23 @@ LLM-driven book generation pipeline with explicit project workspaces and a clean
 
 Runtime data is always project-scoped now.
 
-- Default project: `workspace/default/`
-- Override project: `BOOK_PROJECT_DIR=/abs/path/to/project`
-- Chapter assets: `workspace/default/chapters/`
-- Raw LLM dumps: `workspace/default/artifacts/raw/`
+- Named projects live under `workspace/`
+- The active project is tracked in `workspace/.current_project`
+- Override project path completely with `BOOK_PROJECT_DIR=/abs/path/to/project`
 
 There is no automatic fallback to repo-root `story_bible.md` or `chapters/`. All active story data lives in the project workspace.
+
+For frequent use, manage projects with:
+
+```sh
+python3 project.py init my_new_story
+python3 project.py use my_new_story
+python3 project.py list
+python3 project.py current
+python3 project.py path
+```
+
+If you do nothing, the active project defaults to `workspace/default/`.
 
 ## Core Flow
 
@@ -39,6 +50,7 @@ This keeps the planning layer useful without forcing the prose layer into artifi
 ## Commands
 
 ```sh
+python3 project.py init haunted_greenhouse
 python3 build_story_bible.py "your concept"
 python3 plan_chapters.py --beats
 python3 generate_chapter.py 1
@@ -69,6 +81,7 @@ That workflow now means:
 ## Important Files
 
 - `paths.py`: project/workspace path definitions
+- `project.py`: create and switch named projects under `workspace/`
 - `story_utils.py`: shared parsing and summary/state helpers
 - `chapter_planning.py`: outline lookup plus prompt builders for chapter briefs and chapter drafting
 - `prompts/system_prompt.txt`: chapter-writing system prompt
