@@ -13,6 +13,7 @@ Additional options:
     --raw-targets            Use raw word targets without overshoot adjustment
     --overshoot-factor FLOAT Overshoot factor adjustment (default: 1.5)
     --silent                 Suppress streaming output
+    --no-previous-context    Disable including previous beat in context (for testing transitions)
 """
 import os
 import sys
@@ -22,10 +23,21 @@ import glob
 import subprocess
 from datetime import datetime
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, SCRIPT_DIR)
 from dual_llm import stream_llm
 from config import get_word_count_target, get_default_chapters
+from paths import (
+    CHAPTERS_DIR,
+    CUMULATIVE_SUMMARY_PATH,
+    STORY_BIBLE_PATH,
+    SYSTEM_PROMPT_PATH,
+    chapter_beats_path,
+    chapter_draft_path,
+    chapter_generation_log_path,
+    chapter_polished_path,
+    ensure_runtime_dirs,
+)
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def parse_story_bible(content):
@@ -57,10 +69,14 @@ def parse_beats(beats_content):
     return beats
 
 
-def generate_beat_scene(chapter, beat_num, beat_text, story_bible_text, 
+def generate_beat_scene(chapter, beat_num, beat_text, story_bible_text,
                         cumulative_content, target_words_per_beat, sys_prompt,
-                        is_first=False, is_last=False):
-    """Generate a single beat scene with improved prompting."""
+                        is_first=False, is_last=False, previous_scene=None):
+    """Generate a single beat scene with improved prompting.
+
+    Args:
+        previous_scene: The generated text from the previous beat (for continuity)
+    """
     
     beat_position = ""
     if is_first:
@@ -105,6 +121,7 @@ STORY BIBLE:
 CURRENT STORY CONTEXT (from cumulative_summary.md):
 {cumulative_content}
 
+{("PREVIOUS SCENE (for continuity - ensure seamless transition):\n" + previous_scene + "\n") if previous_scene else ""}
 BEAT {beat_num}{beat_position} FOR CHAPTER {chapter}:
 {beat_text}
 
@@ -113,20 +130,21 @@ BEAT {beat_num}{beat_position} FOR CHAPTER {chapter}:
 EXPANSION TECHNIQUES FOR THIS BEAT:
 {expansion_techniques}
 
-SPECIFIC EXPANSION REQUIREMENTS:
-1. Sensory Details: Describe at least 3 different sensory elements (visual, auditory, olfactory, tactile)
-2. Internal Monologue: Include character thoughts, memories, doubts, or hopes
-3. Dialogue & Subtext: Write meaningful conversations with unspoken tension
-4. Character Actions: Show physical movements, gestures, facial expressions
-5. Setting Enrichment: Make the environment feel lived-in and relevant
-6. Pacing Control: Vary sentence length for rhythm - mix short impactful sentences with flowing descriptions
+SPECIFIC EXPANSION REQUIREMENTS (NSFW FOCUS):
+1. Sensory Details: Describe at least 5 different sensory elements with extreme erotic focus (visual: glistening skin, swollen cock, dripping pussy; auditory: wet slapping, moans, gasps; olfactory: musk, sweat, cum; tactile: heat, slickness, throbbing, stretching; taste: salty pre-cum, sweet arousal).
+2. Internal Monologue: Dive deep into raw, filthy thoughts — lust, desperation, shame, dominance, submission, dirty fantasies.
+3. Dialogue & Subtext: Write dirty, explicit dialogue full of filthy talk, begging, degrading praise, commands. Layer heavy subtext of desire and power.
+4. Character Actions: Show explicit physical movements — spreading legs, stroking cock, fingering, thrusting, gripping, licking, sucking, grinding, climaxing with visible spasms and fluids.
+5. Setting Enrichment: Make the environment heighten the filth (sheets soaked with sweat and cum, mirrors reflecting the act, risk of being caught, etc.).
+6. Pacing Control: Mix short, punchy, vulgar sentences ("His cock slammed into her. She screamed.") with long, flowing, overwhelming descriptions of sensation.
+7. Explicitness Mandate: Be maximally graphic. Never summarize sex. Never say “they made love.” Show every thrust, every wet sound, every spurt of cum, every clench and quiver in pornographic detail.
 
 WORD COUNT TARGET: Approximately {target_words_per_beat:,} words.
 
 {"CHAPTER OPENING NOTE: Start strong and hook the reader immediately." if is_first else ""}
 {"CHAPTER CONCLUSION NOTE: Provide a satisfying ending that completes this chapter's arc." if is_last else ""}
 
-Output ONLY the scene text for this beat (no preamble, no commentary, no beat markers).
+Output ONLY the scene text for this beat (no preamble, no commentary, no beat markers, no disclaimers). Write in a continuous, extremely explicit narrative style dripping with raw sexuality and filth.
 Write in a continuous narrative style appropriate for this beat.
 
 ---
@@ -137,14 +155,16 @@ BEAT {beat_num} SCENE:
 
 
 def generate_chapter(chapter, script_dir, silent=False, output_file=None,
-                              scene_separator="***", adjust_overshoot=True, overshoot_factor=1.5):
+                              scene_separator="***", adjust_overshoot=True, overshoot_factor=1.5,
+                              previous_context=True):
     """
     Generate chapter using per-beat expansion for maximum word count.
     """
-    story_bible = os.path.join(script_dir, "story_bible.md")
-    cumulative = os.path.join(script_dir, "cumulative_summary.md")
-    chapter_beats = os.path.join(script_dir, f"chapters/chapter_{chapter}_beats.md")
-    system_prompt_file = os.path.join(script_dir, "system_prompt.txt")
+    ensure_runtime_dirs()
+    story_bible = STORY_BIBLE_PATH
+    cumulative = CUMULATIVE_SUMMARY_PATH
+    chapter_beats = chapter_beats_path(chapter)
+    system_prompt_file = SYSTEM_PROMPT_PATH
 
     for f in [story_bible, cumulative, chapter_beats, system_prompt_file]:
         if not os.path.exists(f):
@@ -190,6 +210,10 @@ def generate_chapter(chapter, script_dir, silent=False, output_file=None,
     
     num_beats = len(beats)
     target_per_beat = target_words_total // num_beats
+
+    # Calculate max_words for LLM to prevent runaway generation
+    # Allow up to 2.5x the target per beat, plus 500-word buffer, capped at 8000
+    max_words_for_llm = min(int(target_per_beat * 2.5) + 500, 8000)
     
     # Adjust for observed overshoot (factor ~1.7 by default). To get target_total actual,
     # we aim lower. Set adjust_overshoot=False to use raw targets.
@@ -219,20 +243,23 @@ def generate_chapter(chapter, script_dir, silent=False, output_file=None,
         is_first = (idx == 0)
         is_last = (idx == len(beats) - 1)
         
+        previous_scene = scenes[-1] if (previous_context and scenes) else None
         prompt = generate_beat_scene(
-            chapter, beat_num, beat_text, story_bible_text, 
+            chapter, beat_num, beat_text, story_bible_text,
             cumulative_content, adjusted_target_per_beat, sys_prompt,
-            is_first=is_first, is_last=is_last
+            is_first=is_first, is_last=is_last,
+            previous_scene=previous_scene
         )
         
         if not silent:
             print(f"  Generating Beat {beat_num}{' (Opening)' if is_first else ''}{' (Conclusion)' if is_last else ''}...")
         
-        scene = stream_llm(prompt, model='write', system='', silent=silent)
+        scene = stream_llm(prompt, model='write', system='', silent=silent,
+                           max_words=max_words_for_llm, loop_detection=True)
         scenes.append(scene)
         
         # Save intermediate beat scene
-        beat_path = os.path.join(script_dir, f"chapters/chapter_{chapter}_beat{beat_num}_polished.txt")
+        beat_path = chapter_polished_path(chapter, beat_num)
         with open(beat_path, 'w') as f:
             f.write(scene)
         
@@ -267,11 +294,10 @@ Target: {target_words_total:,} words
 """
     full_draft = metadata + combined
     
-    os.makedirs(os.path.join(script_dir, "chapters"), exist_ok=True)
     if output_file:
         output_path = os.path.join(script_dir, output_file)
     else:
-        output_path = os.path.join(script_dir, f"chapters/chapter_{chapter}_draft.txt")
+        output_path = chapter_draft_path(chapter)
     
     with open(output_path, "w") as f:
         f.write(full_draft)
@@ -279,7 +305,7 @@ Target: {target_words_total:,} words
     total_words = sum(beat_word_counts)
     
     # Save summary log
-    log_path = os.path.join(script_dir, f"chapters/chapter_{chapter}_generation_log.md")
+    log_path = chapter_generation_log_path(chapter)
     with open(log_path, "w") as f:
         f.write(f"""# Generation Log - Chapter {chapter}
 Timestamp: {timestamp}
@@ -307,8 +333,9 @@ Overshoot factor: {overshoot_factor:.1f}
     return total_words, output_path, beat_word_counts
 
 
-def generate_all_sequential(script_dir, skip_existing=True, silent=False, 
-                         scene_separator="***", adjust_overshoot=True, overshoot_factor=1.5):
+def generate_all_sequential(script_dir, skip_existing=True, silent=False,
+                         scene_separator="***", adjust_overshoot=True, overshoot_factor=1.5,
+                         previous_context=True):
     """
     Generate all chapters sequentially using per-beat expansion.
     Follows the same workflow as original generate_chapter.py --all:
@@ -316,7 +343,7 @@ def generate_all_sequential(script_dir, skip_existing=True, silent=False,
       2. Run summarize_chapter.py
       3. Generate next beats (if needed)
     """
-    chapters_dir = os.path.join(script_dir, "chapters")
+    chapters_dir = CHAPTERS_DIR
     beats_files = sorted(
         glob.glob(os.path.join(chapters_dir, "chapter_*_beats.md")),
         key=lambda p: int(re.search(r"chapter_(\d+)_beats", p).group(1)),
@@ -353,15 +380,15 @@ def generate_all_sequential(script_dir, skip_existing=True, silent=False,
     ch = min_c
     while ch <= total_chapters:
         ch_str = str(ch)
-        draft_path = os.path.join(chapters_dir, f"chapter_{ch_str}_draft.txt")
-        beats_path = os.path.join(chapters_dir, f"chapter_{ch_str}_beats.md")
+        draft_path = chapter_draft_path(ch_str)
+        beats_path = chapter_beats_path(ch_str)
         
         if not os.path.exists(beats_path):
             # No beats for this chapter — story is complete
             break
         
         # Check if this chapter has already been summarized
-        cumulative_path = os.path.join(script_dir, "cumulative_summary.md")
+        cumulative_path = CUMULATIVE_SUMMARY_PATH
         chapter_summarized = False
         if os.path.exists(cumulative_path):
             with open(cumulative_path) as f:
@@ -381,11 +408,12 @@ def generate_all_sequential(script_dir, skip_existing=True, silent=False,
             # No draft — generate it using per-beat method
             print(f"\n[{ch_str}] Generating chapter {ch_str} (per-beat)...")
             wc, path, beat_counts = generate_chapter(
-                ch_str, script_dir, silent=silent, 
+                ch_str, script_dir, silent=silent,
                 output_file=f"chapters/chapter_{ch_str}_draft.txt",  # Standard filename for pipeline
                 scene_separator=scene_separator,
                 adjust_overshoot=adjust_overshoot,
-                overshoot_factor=overshoot_factor
+                overshoot_factor=overshoot_factor,
+                previous_context=previous_context
             )
             print(f"  ✓ chapter_{ch_str}_draft.txt written ({wc:,} words)")
             print(f"  Beat counts: {', '.join(f'{c:,}' for c in beat_counts)}")
@@ -416,7 +444,7 @@ def generate_all_sequential(script_dir, skip_existing=True, silent=False,
         if ch >= total_chapters:
             pass  # Final chapter, no next beats
         else:
-            next_beats_path = os.path.join(chapters_dir, f"chapter_{ch+1}_beats.md")
+            next_beats_path = chapter_beats_path(ch + 1)
             if os.path.exists(next_beats_path):
                 print(f"  ✓ chapter_{ch+1}_beats.md already exists")
             else:
@@ -444,16 +472,16 @@ def generate_all_sequential(script_dir, skip_existing=True, silent=False,
 def generate_next_chapter_beats(chapter, script_dir):
     """Generate chapter N+1 beats if they don't already exist. Returns beats path or None."""
     next_chapter  = str(int(chapter) + 1)
-    next_beats    = os.path.join(script_dir, f"chapters/chapter_{next_chapter}_beats.md")
+    next_beats = chapter_beats_path(next_chapter)
 
     if os.path.exists(next_beats):
         return None
 
-    with open(os.path.join(script_dir, "story_bible.md")) as f:
+    with open(STORY_BIBLE_PATH) as f:
         story_bible = f.read()
-    with open(os.path.join(script_dir, "cumulative_summary.md")) as f:
+    with open(CUMULATIVE_SUMMARY_PATH) as f:
         summary_content = f.read()
-    with open(os.path.join(script_dir, f"chapters/chapter_{chapter}_beats.md")) as f:
+    with open(chapter_beats_path(chapter)) as f:
         beats_format = f.read()
 
     system_prompt = "You are a story architect."
@@ -506,6 +534,7 @@ Examples:
   %(prog)s --all                # Generate all chapters sequentially (full pipeline)
   %(prog)s --all --no-skip      # Regenerate all chapters even if drafts exist
   %(prog)s --all --separator "" # Generate all without scene separators
+  %(prog)s 2 --no-previous-context # Disable previous beat context for testing transitions
 """
     )
     parser.add_argument("chapter", nargs="?", help="Chapter number to generate (or omit with --all)")
@@ -522,7 +551,10 @@ Examples:
                        help="Use raw word targets without overshoot adjustment")
     parser.add_argument("--overshoot-factor", type=float, default=1.5,
                        help="Overshoot factor adjustment (default: 1.5)")
-    
+    parser.add_argument("--no-previous-context", action="store_false", dest="previous_context",
+                       help="Disable including previous beat in context (for testing transitions)")
+    parser.set_defaults(previous_context=True)
+
     args = parser.parse_args()
     
     # Handle separator
@@ -541,7 +573,8 @@ Examples:
             silent=args.silent,
             scene_separator=scene_separator,
             adjust_overshoot=args.adjust,
-            overshoot_factor=args.overshoot_factor
+            overshoot_factor=args.overshoot_factor,
+            previous_context=args.previous_context
         )
         return
     
@@ -556,7 +589,8 @@ Examples:
         output_file=args.output,
         scene_separator=scene_separator,
         adjust_overshoot=args.adjust,
-        overshoot_factor=args.overshoot_factor
+        overshoot_factor=args.overshoot_factor,
+        previous_context=args.previous_context
     )
     
     target = get_word_count_target() // get_default_chapters()

@@ -17,6 +17,14 @@ import re
 
 from dual_llm import stream_llm
 from config import get_model, get_default_chapters
+from paths import (
+    CHAPTERS_DIR,
+    CHAPTER_BEATS_TEMPLATE_PATH,
+    STORY_BIBLE_PATH,
+    chapter_beats_path,
+    ensure_runtime_dirs,
+    raw_output_path,
+)
 
 DEFAULT_CHAPTERS = get_default_chapters()
 
@@ -52,9 +60,8 @@ def main():
                         help="Regenerate all beats from existing outline")
     args = parser.parse_args()
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    story_bible_path = os.path.join(script_dir, "story_bible.md")
-    chapters_dir = os.path.join(script_dir, "chapters")
+    story_bible_path = STORY_BIBLE_PATH
+    chapters_dir = CHAPTERS_DIR
 
     num_chapters = args.chapters or DEFAULT_CHAPTERS
 
@@ -79,7 +86,7 @@ def main():
         concept = "(Use existing story_bible.md — concept embedded in the document)"
 
     # --- Check/create chapters directory ---
-    os.makedirs(chapters_dir, exist_ok=True)
+    ensure_runtime_dirs()
 
     # --- Generate chapter outline ---
     if args.regen_beats and not args.regen_outline:
@@ -146,7 +153,7 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
         print()
 
         # Save raw output
-        with open(os.path.join(script_dir, "llm_raw_output.txt"), "w") as f:
+        with open(raw_output_path("llm_raw_output.txt"), "w") as f:
             f.write(outline_output)
 
         if not has_story_bible:
@@ -211,7 +218,7 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
         print()
 
         # Load beats template from chapter 1 if it exists AND has actual content
-        template_path = os.path.join(chapters_dir, "chapter_1_beats.md")
+        template_path = CHAPTER_BEATS_TEMPLATE_PATH
         if os.path.exists(template_path) and os.path.getsize(template_path) > 50:
             with open(template_path) as f:
                 beats_template = f.read()
@@ -219,7 +226,7 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
             beats_template = DEFAULT_BEATS_TEMPLATE
 
         for ch_num, ch_title, ch_summary in chapter_entries:
-            beats_file = os.path.join(chapters_dir, f"chapter_{ch_num}_beats.md")
+            beats_file = chapter_beats_path(ch_num)
             # Enhanced: Regenerate all beats when --beats is used (not just when --regen-beats is set)
             # This ensures --beats alone can "generate all chapter beats upfront" as documented
             skip_chapter = (
@@ -238,7 +245,7 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
             for prev_num, prev_title, prev_summary in chapter_entries:
                 if int(prev_num) >= int(ch_num):
                     break
-                prev_file = os.path.join(chapters_dir, f"chapter_{prev_num}_beats.md")
+                prev_file = chapter_beats_path(prev_num)
                 if os.path.exists(prev_file) and os.path.getsize(prev_file) > 50:
                     with open(prev_file) as f:
                         prior_beats.append(f"# Chapter {prev_num} — {prev_title}\n{f.read()}")

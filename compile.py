@@ -8,6 +8,7 @@ Usage:
     python3 compile.py --dry-run          # preview without writing
 """
 import os, re, argparse, glob
+from paths import BOOK_OUTPUT_PATH, CHAPTERS_DIR, CONFIG_PATH, STORY_BIBLE_PATH
 
 DEFAULT_OUTPUT = "book.md"
 
@@ -63,11 +64,10 @@ def get_word_count_annotation(word_count, target):
     return f" (~{word_count:,} words)"
 
 def compile_book(output_path=None, dry_run=False):
-    root = os.path.dirname(__file__)
-    story_bible = os.path.join(root, "story_bible.md")
-    chapters_dir = os.path.join(root, "chapters")
+    story_bible = STORY_BIBLE_PATH
+    chapters_dir = CHAPTERS_DIR
 
-    output_path = output_path or os.path.join(root, DEFAULT_OUTPUT)
+    output_path = output_path or BOOK_OUTPUT_PATH
 
     title = extract_title(story_bible)
     chapter_order = get_chapter_order(story_bible)
@@ -84,7 +84,7 @@ def compile_book(output_path=None, dry_run=False):
     lines.append(f"_Compiled: {len(draft_files)} chapters_\n")
     lines.append("\n---\n")
 
-    target_path = os.path.join(root, "config.json")
+    target_path = CONFIG_PATH
     target = 25000
     if os.path.exists(target_path):
         import json

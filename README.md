@@ -2,6 +2,14 @@
 
 LLM-driven iterative story writing pipeline. Configure once, generate chapters iteratively.
 
+Project layout is intentionally split by role:
+
+- `templates/` holds reusable authoring templates
+- `prompts/` holds shared system prompts
+- `templates/` holds reusable authoring templates
+- `chapters/` holds beats, drafts, and per-chapter logs
+- `artifacts/raw/` holds raw LLM dumps for debugging
+
 ---
 
 ## Setup
@@ -187,6 +195,22 @@ python3 compile.py --output full.md  # custom output path
 
 `compile.py` extracts chapter titles from the outline, adds word‑count annotations per chapter, and produces a clean `.md` file ready for pandoc or similar.
 
+## Repo Layout
+
+```text
+.
+├── artifacts/raw/              # raw debug outputs from LLM calls
+├── chapters/                   # beats, drafts, polished beat scenes, logs
+├── dual_llm/                   # LLM routing/provider code
+├── prompts/
+├── templates/
+├── prompts/system_prompt.txt   # shared chapter-writing system prompt
+├── templates/chapter_beats_TEMPLATE.md
+├── templates/story_bible_TEMPLATE.md
+├── paths.py                    # shared project path constants/helpers
+└── *.py                        # workflow entry points
+```
+
 ## Tips
 
 - **Edit the chapter outline** in `story_bible.md` before generating beats — reorder chapters, change summaries, cull chapters. Then run `--regen‑beats`.
@@ -197,6 +221,7 @@ python3 compile.py --output full.md  # custom output path
 - **Re‑summarize**: remove the chapter's entry from `cumulative_summary.md`, rerun `summarize_chapter.py N`.
 - **Control word count**: Use `--overshoot‑factor` (default 1.5) to adjust expansion. Lower values = closer to target.
 - **Scene transitions**: Default `***` separators make beat boundaries clear. Use `--separator ""` for seamless joins.
+- Raw LLM transcripts are written to `artifacts/raw/` instead of cluttering the repo root.
 
 ---
 

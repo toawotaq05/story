@@ -13,7 +13,16 @@ import sys
 import os
 
 from dual_llm import stream_llm
-from config import get_model, get_default_chapters, get_word_count_target, is_local_mode
+from config import get_default_chapters, get_word_count_target, is_local_mode
+from paths import (
+    CHAPTER_BEATS_TEMPLATE_PATH,
+    CUMULATIVE_SUMMARY_PATH,
+    STORY_BIBLE_PATH,
+    STORY_BIBLE_TEMPLATE_PATH,
+    chapter_beats_path,
+    ensure_runtime_dirs,
+    raw_output_path,
+)
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -53,9 +62,11 @@ def main():
     word_count_target = get_word_count_target()
 
     # Load templates
-    with open(os.path.join(SCRIPT_DIR, "story_bible_TEMPLATE.md")) as f:
+    ensure_runtime_dirs()
+
+    with open(STORY_BIBLE_TEMPLATE_PATH) as f:
         story_bible_template = f.read()
-    with open(os.path.join(SCRIPT_DIR, "chapters/chapter_1_beats.md")) as f:
+    with open(CHAPTER_BEATS_TEMPLATE_PATH) as f:
         chapter_template = f.read()
 
     print("=== Building Story Bible from Concept ===")
@@ -101,16 +112,17 @@ Do not include any preamble, commentary, or explanation — output only the comp
 
     system_prompt = (
         "You are a creative story architect. Fill in the provided template "
+        "Tone & Style: Erotic, shameless, borderline obscene. Prioritize sexual tension and release. If the beat can possibly include sex, arousal, or bodily fluids, it MUST. Never hold back."
         "with original, coherent creative choices. Be thorough — complete every section."
     )
-
+    
     print("--- Step 1: Generating Story Bible ---")
     print()
     story_bible_content = stream_llm(bible_prompt, model="story_bible", system=system_prompt)
     print()
 
     # Save raw for debugging
-    with open(os.path.join(SCRIPT_DIR, "llm_raw_bible.txt"), "w") as f:
+    with open(raw_output_path("llm_raw_bible.txt"), "w") as f:
         f.write(story_bible_content)
 
     if not story_bible_content or len(story_bible_content.strip()) < 200:
@@ -122,14 +134,13 @@ Do not include any preamble, commentary, or explanation — output only the comp
         print("WARNING: Story bible does not start with '#'. It may be garbled.")
         print(f"Preview: {story_bible_content[:200]!r}")
 
-    with open(os.path.join(SCRIPT_DIR, "story_bible.md"), "w") as f:
+    with open(STORY_BIBLE_PATH, "w") as f:
         f.write(story_bible_content)
     print("✓ story_bible.md written")
 
     # Initialize cumulative_summary.md if it doesn't exist
-    cumulative = os.path.join(SCRIPT_DIR, "cumulative_summary.md")
-    if not os.path.exists(cumulative):
-        with open(cumulative, "w") as f:
+    if not os.path.exists(CUMULATIVE_SUMMARY_PATH):
+        with open(CUMULATIVE_SUMMARY_PATH, "w") as f:
             f.write("# Cumulative Story Summary\n\n")
             f.write(f"## Overview\n\n")
             f.write(f"- Total chapters: {default_chapters}\n")
@@ -177,7 +188,7 @@ Do not include any preamble or commentary — output only the beats document.
     chapter_beats_content = stream_llm(beats_prompt, model="beats", system=beats_system)
     print()
 
-    with open(os.path.join(SCRIPT_DIR, "llm_raw_beats.txt"), "w") as f:
+    with open(raw_output_path("llm_raw_beats.txt"), "w") as f:
         f.write(chapter_beats_content)
 
     if not chapter_beats_content or len(chapter_beats_content.strip()) < 100:
@@ -188,7 +199,7 @@ Do not include any preamble or commentary — output only the beats document.
         print("WARNING: Chapter beats do not start with '# Chapter'. Content may be garbled.")
         print(f"Preview: {chapter_beats_content[:200]!r}")
 
-    with open(os.path.join(SCRIPT_DIR, "chapters/chapter_1_beats.md"), "w") as f:
+    with open(chapter_beats_path(1), "w") as f:
         f.write(chapter_beats_content)
     print("✓ chapters/chapter_1_beats.md written")
 

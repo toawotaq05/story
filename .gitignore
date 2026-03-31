@@ -1,14 +1,19 @@
 # Debug / generated output
+artifacts/raw/*.txt
 llm_raw_output.txt
 __pycache__/
+.pytest_cache/
+*/__pycache__/
 
 # Generated story content — project-specific (keep beats; generated drafts live alongside them)
 story_bible.md
 cumulative_summary.md
 book.md
 chapters/*_draft.txt
+chapters/*_beats.md
 chapters/*_polished.txt
 chapters/*_generation_log.md
+chapters/*.bak
 
 # Backup files
 *.backup

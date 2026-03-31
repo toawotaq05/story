@@ -6,12 +6,12 @@ Usage: python3 status.py
 """
 import os, glob, re
 from config import get_word_count_target
+from paths import CHAPTERS_DIR, CUMULATIVE_SUMMARY_PATH, STORY_BIBLE_PATH
 
 def main():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    chapters_dir = os.path.join(script_dir, "chapters")
-    story_bible = os.path.join(script_dir, "story_bible.md")
-    cumulative = os.path.join(script_dir, "cumulative_summary.md")
+    chapters_dir = CHAPTERS_DIR
+    story_bible = STORY_BIBLE_PATH
+    cumulative = CUMULATIVE_SUMMARY_PATH
 
     print("=" * 50)
     print("STORY PIPELINE STATUS")

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Shared config — all scripts import model settings from here."""
-import os, json
+import json
+import os
+
+from paths import CONFIG_PATH
 
 DEFAULT_MODEL = "openrouter/thedrummer/cydonia-24b-v4.1"
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 
 _config_cache = None
 

@@ -8,6 +8,7 @@ import subprocess, sys, os, unittest, json, tempfile, shutil, unittest.mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import get_model, DEFAULT_MODEL
+from paths import CHAPTERS_DIR, CHAPTER_BEATS_TEMPLATE_PATH, PROMPTS_DIR, RAW_OUTPUTS_DIR, TEMPLATES_DIR
 
 # -------------------------------------------------------------------
 # Mock LLM responses (ASCII-safe)
@@ -94,24 +95,25 @@ class TestProjectStructure(unittest.TestCase):
     def test_all_scripts_exist(self):
         for script in ["build_story_bible.py", "plan_chapters.py",
                        "generate_chapter.py", "summarize_chapter.py",
+                       "repair_beats.py",
                        "status.py", "config.py"]:
             path = os.path.join(self.root, script)
             self.assertTrue(os.path.exists(path), f"Missing: {script}")
 
     def test_chapters_dir_exists(self):
-        chapters = os.path.join(self.root, "chapters")
-        self.assertTrue(os.path.isdir(chapters))
+        self.assertTrue(os.path.isdir(CHAPTERS_DIR))
+
+    def test_support_dirs_exist(self):
+        for path in [PROMPTS_DIR, RAW_OUTPUTS_DIR, TEMPLATES_DIR]:
+            self.assertTrue(os.path.isdir(path), f"Missing support dir: {path}")
 
     def test_beats_template_format(self):
         """Beats template should have required sections."""
-        template_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "chapters", "chapter_1_beats.md"
-        )
+        template_path = CHAPTER_BEATS_TEMPLATE_PATH
         if os.path.exists(template_path):
             with open(template_path) as f:
                 content = f.read()
-            for section in ["### Opening", "### Key Events", "### Turning Point"]:
+            for section in ["### Beat 1:", "### Beat 2:", "### Beat 3:", "### Beat 4:"]:
                 self.assertIn(section, content, f"Missing: {section}")
 
 
@@ -229,21 +231,12 @@ class TestMockedLLM(unittest.TestCase):
             returncode = 0
 
             def __init__(self):
-                self._data = b"mocked output"
-
-            def read(self, n=-1):
-                if n == -1:
-                    r = self._data
-                    self._data = b""
-                    return r
-                if not self._data:
-                    return b""
-                r = self._data[:n]
-                self._data = self._data[n:]
-                return r
+                self.stdin = io.StringIO()
+                self.stdout = io.StringIO("mocked output")
+                self.stderr = io.StringIO("")
 
             def communicate(self, input=None):
-                return self._data, b""
+                return self.stdout.read(), self.stderr.read()
 
             def wait(self):
                 return 0
@@ -251,10 +244,12 @@ class TestMockedLLM(unittest.TestCase):
         mock_popen.return_value = MockProcess()
 
         from dual_llm.llm_provider import stream_llm
+        from unittest.mock import patch
         original_popen = subprocess.Popen
         subprocess.Popen = mock_popen
         try:
-            stream_llm("test prompt", model=DEFAULT_MODEL)
+            with patch("dual_llm.llm_provider.is_local_mode", return_value=False):
+                stream_llm("test prompt", model=DEFAULT_MODEL)
         finally:
             subprocess.Popen = original_popen
 

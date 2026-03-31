@@ -6,6 +6,12 @@ and generate the next chapter's beats. Streaming output enabled.
 import sys, os, re
 from dual_llm import stream_llm
 from config import get_model
+from paths import (
+    CUMULATIVE_SUMMARY_PATH,
+    STORY_BIBLE_PATH,
+    chapter_beats_path,
+    chapter_draft_path,
+)
 
 def main():
     if len(sys.argv) < 2:
@@ -14,12 +20,10 @@ def main():
 
     chapter = sys.argv[1]
     next_chapter = str(int(chapter) + 1)
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-
-    chapter_draft = os.path.join(script_dir, f"chapters/chapter_{chapter}_draft.txt")
-    next_beats = os.path.join(script_dir, f"chapters/chapter_{next_chapter}_beats.md")
-    cumulative = os.path.join(script_dir, "cumulative_summary.md")
-    story_bible = os.path.join(script_dir, "story_bible.md")
+    chapter_draft = chapter_draft_path(chapter)
+    next_beats = chapter_beats_path(next_chapter)
+    cumulative = CUMULATIVE_SUMMARY_PATH
+    story_bible = STORY_BIBLE_PATH
 
     if not os.path.exists(chapter_draft):
         print(f"ERROR: Chapter draft not found: {chapter_draft}")
@@ -84,7 +88,7 @@ Format your response EXACTLY as follows — do not add any preamble, commentary,
     # --- Generate next chapter beats ---
     with open(story_bible) as f:
         story_bible_text = f.read()
-    current_beats = os.path.join(script_dir, f"chapters/chapter_{chapter}_beats.md")
+    current_beats = chapter_beats_path(chapter)
     with open(current_beats) as f:
         beats_format = f.read()
 
