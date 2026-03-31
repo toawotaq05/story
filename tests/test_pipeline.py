@@ -155,7 +155,7 @@ class TestCLISmoke(unittest.TestCase):
     def test_generate_chapter_all_with_no_beats_exits_cleanly(self):
         """With no beats files, --all should print a helpful message and exit."""
         # Temporarily rename chapters dir so no beats are found
-        chapters_dir = os.path.join(self.root, "chapters")
+        chapters_dir = CHAPTERS_DIR
         backup = chapters_dir + ".bak"
         shutil.move(chapters_dir, backup)
         try:

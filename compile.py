@@ -5,55 +5,13 @@ compile.py — Assemble all chapter drafts into a single .md ebook.
 Usage:
     python3 compile.py                  # default: output book.md
     python3 compile.py --output mybook.md
-    python3 compile.py --dry-run          # preview without writing
+    python3 compile.py --dry-run        # preview without writing
 """
 import os, re, argparse, glob
 from paths import BOOK_OUTPUT_PATH, CHAPTERS_DIR, CONFIG_PATH, STORY_BIBLE_PATH
+from story_utils import count_words, extract_story_title, parse_outline_entries, split_story_bible_and_outline
 
-DEFAULT_OUTPUT = "book.md"
-
-def count_words(text):
-    return len(text.split())
-
-def extract_title(story_bible_path):
-    """Pull the first # Title from story_bible.md."""
-    if not os.path.exists(story_bible_path):
-        return "Untitled Story"
-    with open(story_bible_path) as f:
-        for line in f:
-            m = re.match(r"^#\s+(.+)", line)
-            if m:
-                return m.group(1).strip()
-    return "Untitled Story"
-
-def extract_chapter_title(story_bible_path, chapter_num):
-    """Find 'N. **Chapter Title**' from the outline in story_bible.md."""
-    if not os.path.exists(story_bible_path):
-        return None
-    with open(story_bible_path) as f:
-        content = f.read()
-    # Match lines like: 1. **Chapter 1 - The Letter** — ...
-    pattern = rf"^\d+\.\s+\*\*Chapter\s+\d+\s*[-–—]\s*([^*`]+?)\*\*"
-    for line in content.splitlines():
-        m = re.match(pattern, line.strip())
-        if m:
-            return m.group(1).strip()
-    return None
-
-def get_chapter_order(story_bible_path):
-    """Return ordered list of (chapter_num, title) from outline."""
-    if not os.path.exists(story_bible_path):
-        return []
-    with open(story_bible_path) as f:
-        content = f.read()
-    results = []
-    for line in content.splitlines():
-        m = re.match(r"^(\d+)\.\s+\*\*([^*]+)\*\*", line.strip())
-        if m:
-            num = int(m.group(1))
-            title = m.group(2).strip()
-            results.append((num, title))
-    return results
+DEFAULT_OUTPUT = BOOK_OUTPUT_PATH
 
 def get_word_count_annotation(word_count, target):
     """Return a small annotation string if worthwhile."""
@@ -69,8 +27,14 @@ def compile_book(output_path=None, dry_run=False):
 
     output_path = output_path or BOOK_OUTPUT_PATH
 
-    title = extract_title(story_bible)
-    chapter_order = get_chapter_order(story_bible)
+    title = "Untitled Story"
+    chapter_order = []
+    if os.path.exists(story_bible):
+        with open(story_bible) as f:
+            story_bible_content = f.read()
+        title = extract_story_title(story_bible_content)
+        _, outline_section = split_story_bible_and_outline(story_bible_content)
+        chapter_order = [(entry.number, entry.title) for entry in parse_outline_entries(outline_section)]
 
     # Collect all existing drafts
     draft_files = sorted(glob.glob(os.path.join(chapters_dir, "chapter_*_draft.txt")))

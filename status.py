@@ -6,7 +6,8 @@ Usage: python3 status.py
 """
 import os, glob, re
 from config import get_word_count_target
-from paths import CHAPTERS_DIR, CUMULATIVE_SUMMARY_PATH, STORY_BIBLE_PATH
+from paths import CHAPTERS_DIR, CUMULATIVE_SUMMARY_PATH, STORY_BIBLE_PATH, PROJECT_DIR
+from story_utils import extract_story_title, extract_summary_headers, parse_completed_chapters, parse_outline_entries, split_story_bible_and_outline
 
 def main():
     chapters_dir = CHAPTERS_DIR
@@ -16,21 +17,16 @@ def main():
     print("=" * 50)
     print("STORY PIPELINE STATUS")
     print("=" * 50)
+    print(f"Project dir: {PROJECT_DIR}")
     print()
 
     # --- Story bible ---
     if os.path.exists(story_bible):
         with open(story_bible) as f:
             sb = f.read()
-        # Extract title
-        title = "Untitled"
-        for line in sb.split("\n"):
-            if line.startswith("# ") and not line.startswith("##"):
-                title = line[2:].strip()
-                break
-        # Extract outline chapters
-        import re
-        outline_entries = re.findall(r'^\d+\.\s+\*\*Chapter\s+(\d+)', sb, re.MULTILINE)
+        title = extract_story_title(sb)
+        _, outline_section = split_story_bible_and_outline(sb)
+        outline_entries = parse_outline_entries(outline_section)
         planned = len(outline_entries)
         print(f"  Title:   {title}")
         print(f"  Planned chapters: {planned if planned > 0 else '? (run plan_chapters.py)'}")
@@ -43,15 +39,13 @@ def main():
     if os.path.exists(cumulative):
         with open(cumulative) as f:
             cum = f.read()
-        m = re.search(r'Completed Chapters:\s*(\d+)', cum)
-        if m:
-            completed = int(m.group(1))
-        summaries = re.findall(r'^### Chapter \d+', cum, re.MULTILINE)
+        completed = parse_completed_chapters(cum)
+        summaries = extract_summary_headers(cum)
         print(f"  Completed chapters: {completed}")
         if summaries:
             print(f"  Chapter summaries in cumulative_summary.md:")
-            for s in summaries:
-                print(f"    {s[4:]}")  # strip "### "
+            for number, title in summaries:
+                print(f"    Chapter {number} — {title}")
     else:
         print("  cumulative_summary.md: NOT FOUND")
     print()
@@ -75,10 +69,9 @@ def main():
     if os.path.exists(story_bible):
         with open(story_bible) as f:
             sb = f.read()
-        for m in re.finditer(r'^\d+\.\s+\*\*Chapter\s+(\d+)\s*—\s*([^*]+)\*\*', sb, re.MULTILINE):
-            num = m.group(1).lstrip('0') or m.group(1)
-            title = m.group(2).strip()
-            planned_map[num] = title
+        _, outline_section = split_story_bible_and_outline(sb)
+        for entry in parse_outline_entries(outline_section):
+            planned_map[str(entry.number)] = entry.title
 
     all_chapters = set(list(draft_map.keys()) + list(planned_map.keys()))
     if not all_chapters:
@@ -114,5 +107,4 @@ def main():
     print("=" * 50)
 
 if __name__ == "__main__":
-    import re
     main()

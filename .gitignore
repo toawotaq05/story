@@ -17,6 +17,7 @@ chapters/*.bak
 
 # Backup files
 *.backup
+workspace/
 
 # Experimental scripts
 *_scenes.py

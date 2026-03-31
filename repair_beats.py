@@ -14,7 +14,6 @@ import argparse
 
 from dual_llm import stream_llm
 from config import get_model
-from generate_chapter import parse_beats  # Reuse the same parser for validation
 from paths import (
     CHAPTERS_DIR,
     CHAPTER_BEATS_TEMPLATE_PATH,
@@ -22,6 +21,7 @@ from paths import (
     STORY_BIBLE_PATH,
     chapter_beats_path,
 )
+from story_utils import is_valid_beats_document, parse_beats
 
 
 def validate_beats_file(beats_path):
@@ -40,7 +40,7 @@ def validate_beats_file(beats_path):
         return False, f"Parse error: {e}"
 
 
-def regenerate_beats(chapter, script_dir, force=False):
+def regenerate_beats(chapter, force=False):
     chapter_str = str(chapter)
     beats_path = chapter_beats_path(chapter_str)
 
@@ -118,6 +118,9 @@ INSTRUCTIONS:
     if not content or len(content.strip()) < 50:
         print(f"ERROR: Beats output is empty or too short ({len(content.strip()) if content else 0} chars)")
         return False
+    if not is_valid_beats_document(content):
+        print(f"ERROR: Generated beats did not match expected chapter-beats format")
+        return False
 
     os.makedirs(CHAPTERS_DIR, exist_ok=True)
     with open(beats_path, "w") as f:
@@ -160,7 +163,7 @@ def main():
     success_count = 0
     fail_count = 0
     for ch in chapters:
-        if regenerate_beats(ch, CHAPTERS_DIR, force=args.force):
+        if regenerate_beats(ch, force=args.force):
             success_count += 1
         else:
             fail_count += 1

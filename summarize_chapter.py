@@ -3,7 +3,7 @@
 summarize_chapter.py — Summarize a completed chapter, update cumulative_summary.md,
 and generate the next chapter's beats. Streaming output enabled.
 """
-import sys, os, re
+import sys, os
 from dual_llm import stream_llm
 from config import get_model
 from paths import (
@@ -12,6 +12,7 @@ from paths import (
     chapter_beats_path,
     chapter_draft_path,
 )
+from story_utils import extract_summary_headers, set_completed_chapters, upsert_chapter_summary
 
 def main():
     if len(sys.argv) < 2:
@@ -71,17 +72,16 @@ Format your response EXACTLY as follows — do not add any preamble, commentary,
     print("-" * 40)
     print()
 
-    with open(cumulative, "a") as f:
-        f.write("\n" + summary)
-    with open(cumulative) as f:
-        content = f.read()
-    new_content = re.sub(
-        r'(Completed Chapters:\s*)\d+',
-        rf'\g<1>{chapter}',
-        content
-    )
+    existing_content = ""
+    if os.path.exists(cumulative):
+        with open(cumulative) as f:
+            existing_content = f.read()
+
+    updated_content = upsert_chapter_summary(existing_content, chapter, summary)
+    new_content = set_completed_chapters(updated_content, chapter)
     with open(cumulative, "w") as f:
         f.write(new_content)
+    content = new_content
 
     print(f"✓ Chapter {chapter} summarized")
 
@@ -132,9 +132,8 @@ INSTRUCTIONS:
             break
     print()
     print("Chapter summaries so far:")
-    for line in content.split("\n"):
-        if line.startswith("### Chapter "):
-            print(" ", line)
+    for chapter_number, title in extract_summary_headers(content):
+        print(f"  Chapter {chapter_number} — {title}")
     print()
     print("Next step:")
     print(f"  python3 generate_chapter.py {next_chapter}")

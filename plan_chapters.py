@@ -13,7 +13,6 @@ Usage:
 import sys
 import os
 import argparse
-import re
 
 from dual_llm import stream_llm
 from config import get_model, get_default_chapters
@@ -25,26 +24,15 @@ from paths import (
     ensure_runtime_dirs,
     raw_output_path,
 )
+from story_utils import (
+    build_outline_section,
+    is_valid_beats_document,
+    merge_story_bible_and_outline,
+    parse_outline_entries,
+    split_story_bible_and_outline,
+)
 
 DEFAULT_CHAPTERS = get_default_chapters()
-
-DEFAULT_BEATS_TEMPLATE = """# Chapter {chapter} — {title}
-
-## Chapter Beats
-
-### Beat 1: [Hook/Opening]
-- 
-
-### Beat 2: [Inciting Incident/Development]
-- 
-
-### Beat 3: [Midpoint/Rising Action]
-- 
-
-### Beat 4: [Climax/Resolution]
-- 
-
-(Write detailed scene descriptions, dialogue cues, and sensory details for each beat. Each beat should be a self-contained scene that advances the story.)"""
 
 def main():
     parser = argparse.ArgumentParser(description="Plan the full chapter outline before writing.")
@@ -157,27 +145,27 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
             f.write(outline_output)
 
         if not has_story_bible:
-            # Split story bible + outline
-            marker = "---"
-            if marker not in outline_output:
-                print("ERROR: Could not parse story bible from outline output")
+            story_bible_content, outline_content = split_story_bible_and_outline(outline_output)
+            if not outline_content:
+                print("ERROR: Could not parse chapter outline from combined output")
                 sys.exit(1)
-            parts = outline_output.split(marker, 1)
-            story_bible_content = parts[0].strip()
-            outline_content = parts[1].strip() if len(parts) > 1 else ""
 
             with open(story_bible_path, "w") as f:
                 f.write(story_bible_content)
             print(f"✓ story_bible.md written ({len(story_bible_content.split())} words)")
         else:
-            # Append outline section to existing story bible
             outline_content = outline_output.strip()
 
-        # Append outline to story_bible.md as a new section
-        outline_section = f"\n\n---\n\n{outline_content}\n"
-        with open(story_bible_path, "a") as f:
-            f.write(outline_section)
-        print(f"✓ Chapter outline appended to story_bible.md")
+        outline_entries = parse_outline_entries(outline_content)
+        if not outline_entries:
+            print("ERROR: Could not parse chapter entries from generated outline")
+            sys.exit(1)
+
+        normalized_outline = build_outline_section(outline_entries)
+        base_story_bible, _ = split_story_bible_and_outline(story_bible_text if has_story_bible else story_bible_content)
+        with open(story_bible_path, "w") as f:
+            f.write(merge_story_bible_and_outline(base_story_bible, normalized_outline))
+        print(f"✓ Chapter outline written to story_bible.md")
         print()
 
     # --- Optionally generate all chapter beats ---
@@ -186,28 +174,11 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
         with open(story_bible_path) as f:
             full_text = f.read()
 
-        # Extract outline section (after the last --- divider)
-        outline_start = full_text.rfind('\n---\n')
-        if outline_start == -1:
+        story_bible_core, outline_section = split_story_bible_and_outline(full_text)
+        if not outline_section:
             print("ERROR: Could not find chapter outline in story_bible.md")
             sys.exit(1)
-        outline_section = full_text[outline_start + 4:].strip()
-        story_bible_core = full_text[:outline_start].strip()
-
-        # Extract individual chapter entries
-        chapter_entries = []
-        for line in outline_section.split('\n'):
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            # Match: "1. **Chapter 1 — Title** — summary → ends: note"
-            import re
-            m = re.match(r'^\d+\.\s+\*\*Chapter\s+(\d+)\s*—\s*([^*]+)\*\*\s*—\s*(.+)', line)
-            if m:
-                ch_num = m.group(1).lstrip('0')
-                ch_title = m.group(2).strip()
-                summary = m.group(3).strip()
-                chapter_entries.append((ch_num, ch_title, summary))
+        chapter_entries = parse_outline_entries(outline_section)
 
         if not chapter_entries:
             print("ERROR: Could not parse chapter entries from outline")
@@ -222,18 +193,16 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
         if os.path.exists(template_path) and os.path.getsize(template_path) > 50:
             with open(template_path) as f:
                 beats_template = f.read()
-        else:
-            beats_template = DEFAULT_BEATS_TEMPLATE
 
-        for ch_num, ch_title, ch_summary in chapter_entries:
+        for entry in chapter_entries:
+            ch_num = str(entry.number)
+            ch_title = entry.title
+            summary_parts = [entry.summary]
+            if entry.ending:
+                summary_parts.append(f"ends: {entry.ending}")
+            ch_summary = " -> ".join(part for part in summary_parts if part)
             beats_file = chapter_beats_path(ch_num)
-            # Enhanced: Regenerate all beats when --beats is used (not just when --regen-beats is set)
-            # This ensures --beats alone can "generate all chapter beats upfront" as documented
-            skip_chapter = (
-                os.path.exists(beats_file) 
-                and not args.regen_beats 
-                and not args.beats
-            )
+            skip_chapter = os.path.exists(beats_file) and not args.regen_beats
             if skip_chapter:
                 print(f"  Skipping Chapter {ch_num} (already exists)")
                 continue
@@ -242,13 +211,13 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
 
             # Build context: what came before (skip empty beats files)
             prior_beats = []
-            for prev_num, prev_title, prev_summary in chapter_entries:
-                if int(prev_num) >= int(ch_num):
+            for prev_entry in chapter_entries:
+                if prev_entry.number >= entry.number:
                     break
-                prev_file = chapter_beats_path(prev_num)
+                prev_file = chapter_beats_path(prev_entry.number)
                 if os.path.exists(prev_file) and os.path.getsize(prev_file) > 50:
                     with open(prev_file) as f:
-                        prior_beats.append(f"# Chapter {prev_num} — {prev_title}\n{f.read()}")
+                        prior_beats.append(f"# Chapter {prev_entry.number} — {prev_entry.title}\n{f.read()}")
 
             prior_context = "\n\n".join(prior_beats) if prior_beats else "(No prior chapters — this is the opening)"
 
@@ -281,7 +250,7 @@ INSTRUCTIONS:
             print()
 
             # Validate: beats should start with "# Chapter", not the story bible or garbage
-            if not beats_content.strip().startswith("# Chapter"):
+            if not is_valid_beats_document(beats_content):
                 print(f"  ⚠ WARNING: Generated beats for Chapter {ch_num} look wrong (starts with: {beats_content.strip()[:80]!r})")
                 print(f"  ⚠ NOT writing chapter_{ch_num}_beats.md — run with --regen-beats to retry")
                 print(f"  ⚠ If this persists, check if local LLM context window is too small")

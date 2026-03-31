@@ -36,6 +36,7 @@ from paths import (
     chapter_polished_path,
     ensure_runtime_dirs,
 )
+from story_utils import has_summary_for_chapter, parse_beats
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -47,26 +48,6 @@ def parse_story_bible(content):
     pov = pov_match.group(1).strip() if pov_match else None
     tense = tense_match.group(1).strip() if tense_match else None
     return pov, tense
-
-
-def parse_beats(beats_content):
-    """Split beats content into list of (beat_number, beat_text)."""
-    beats = []
-    lines = beats_content.split('\n')
-    current_beat = None
-    current_text = []
-    for line in lines:
-        match = re.match(r'^### Beat (\d+):', line.strip())
-        if match:
-            if current_beat is not None:
-                beats.append((current_beat, '\n'.join(current_text).strip()))
-            current_beat = int(match.group(1))
-            current_text = [line]
-        elif current_beat is not None:
-            current_text.append(line)
-    if current_beat is not None:
-        beats.append((current_beat, '\n'.join(current_text).strip()))
-    return beats
 
 
 def generate_beat_scene(chapter, beat_num, beat_text, story_bible_text,
@@ -393,7 +374,7 @@ def generate_all_sequential(script_dir, skip_existing=True, silent=False,
         if os.path.exists(cumulative_path):
             with open(cumulative_path) as f:
                 cum_text = f.read()
-            chapter_summarized = f"### Chapter {ch}" in cum_text or f"### Chapter {ch} " in cum_text
+            chapter_summarized = has_summary_for_chapter(cum_text, ch)
         
         if os.path.exists(draft_path) and chapter_summarized:
             # Fully done — skip entirely

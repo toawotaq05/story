@@ -24,33 +24,6 @@ from paths import (
     raw_output_path,
 )
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-
-
-def split_output(output):
-    """
-    Parse LLM output into (story_bible, chapter_beats).
-    Tries the explicit marker first, then falls back to splitting on
-    the first markdown heading that looks like a chapter.
-    """
-    marker = "@@@STORY_BIBLE_END_MARKER@@@"
-    if marker in output:
-        parts = output.split(marker, 1)
-        return parts[0].strip(), parts[1].strip()
-
-    # Fallback: split on the first "# Chapter N" or "# Chapter —" line
-    import re
-    m = re.search(r'(?m)^#\s+Chapter\s+\d+\s*[:—\-]', output)
-    if m:
-        idx = m.start()
-        return output[:idx].strip(), output[idx:].strip()
-
-    raise ValueError(
-        f"Could not parse LLM output. "
-        f"Neither marker nor '# Chapter' heading found. "
-        f"Output preview: {output[:300]!r}..."
-    )
-
 
 def main():
     if len(sys.argv) < 2:
@@ -112,10 +85,9 @@ Do not include any preamble, commentary, or explanation — output only the comp
 
     system_prompt = (
         "You are a creative story architect. Fill in the provided template "
-        "Tone & Style: Erotic, shameless, borderline obscene. Prioritize sexual tension and release. If the beat can possibly include sex, arousal, or bodily fluids, it MUST. Never hold back."
         "with original, coherent creative choices. Be thorough — complete every section."
     )
-    
+
     print("--- Step 1: Generating Story Bible ---")
     print()
     story_bible_content = stream_llm(bible_prompt, model="story_bible", system=system_prompt)

@@ -6,9 +6,9 @@ Project layout is intentionally split by role:
 
 - `templates/` holds reusable authoring templates
 - `prompts/` holds shared system prompts
-- `templates/` holds reusable authoring templates
-- `chapters/` holds beats, drafts, and per-chapter logs
-- `artifacts/raw/` holds raw LLM dumps for debugging
+- `workspace/default/` holds runtime story data for new projects
+- `workspace/default/chapters/` holds beats, drafts, and per-chapter logs
+- `workspace/default/artifacts/raw/` holds raw LLM dumps for debugging
 
 ---
 
@@ -47,6 +47,8 @@ Edit `config.json` to set models per task and story targets:
 ```
 
 Each task can use a different model. Set `local_mode: true` to use a local llama.cpp server (faster, cheaper) or false for remote APIs. Targets are advisory — `status.py` tracks progress against them.
+
+Runtime data is project-scoped. By default, fresh runs use `workspace/default/`. To point the pipeline at a different book workspace, set `BOOK_PROJECT_DIR=/abs/path/to/project`. If you already have root-level `story_bible.md` / `chapters/` data from older runs, the scripts will keep using that legacy layout automatically.
 
 ---
 
@@ -199,14 +201,16 @@ python3 compile.py --output full.md  # custom output path
 
 ```text
 .
-├── artifacts/raw/              # raw debug outputs from LLM calls
-├── chapters/                   # beats, drafts, polished beat scenes, logs
 ├── dual_llm/                   # LLM routing/provider code
 ├── prompts/
 ├── templates/
+├── workspace/default/          # default runtime project data
+├── workspace/default/chapters/
+├── workspace/default/artifacts/raw/
 ├── prompts/system_prompt.txt   # shared chapter-writing system prompt
 ├── templates/chapter_beats_TEMPLATE.md
 ├── templates/story_bible_TEMPLATE.md
+├── story_utils.py              # shared parsing/state helpers
 ├── paths.py                    # shared project path constants/helpers
 └── *.py                        # workflow entry points
 ```
@@ -221,7 +225,7 @@ python3 compile.py --output full.md  # custom output path
 - **Re‑summarize**: remove the chapter's entry from `cumulative_summary.md`, rerun `summarize_chapter.py N`.
 - **Control word count**: Use `--overshoot‑factor` (default 1.5) to adjust expansion. Lower values = closer to target.
 - **Scene transitions**: Default `***` separators make beat boundaries clear. Use `--separator ""` for seamless joins.
-- Raw LLM transcripts are written to `artifacts/raw/` instead of cluttering the repo root.
+- Raw LLM transcripts are written to the active project's `artifacts/raw/` instead of cluttering the repo root.
 
 ---
 
