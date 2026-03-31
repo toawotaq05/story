@@ -202,6 +202,31 @@ class TestChapterPlanning(unittest.TestCase):
         self.assertIn("Last line of prior prose.", prompt)
         self.assertIn("Block 0 summary", prompt)
         self.assertIn("SYSTEM PROMPT", prompt)
+        self.assertIn("COMPLETED BEATS (already covered; do not restage):", prompt)
+        self.assertIn("UPCOMING BEATS (aim toward these, but do not fully cover them yet):", prompt)
+        self.assertIn("Do not replay, paraphrase, or re-stage an earlier beat", prompt)
+        self.assertNotIn("FULL CHAPTER BRIEF FOR", prompt)
+
+    def test_build_scene_block_prompt_separates_completed_current_and_upcoming_beats(self):
+        beats = story_utils.parse_beats(SAMPLE_BRIEF)
+        block = story_utils.group_beats_into_blocks(beats, beats_per_block=2)[1]
+        prompt = chapter_planning.build_scene_block_prompt(
+            SAMPLE_STORY_BIBLE,
+            SAMPLE_SUMMARY,
+            SAMPLE_BRIEF,
+            "SYSTEM PROMPT",
+            1,
+            block,
+            prior_blocks_summary="Block 1 summary",
+            prior_text_tail="The train pulled out.",
+            total_blocks=2,
+        )
+        self.assertIn("- Beat 1: Mara comes home in the rain", prompt)
+        self.assertIn("- Beat 2: She rereads the letter", prompt)
+        self.assertIn("### Beat 3: Choice", prompt)
+        self.assertIn("### Beat 4: Departure", prompt)
+        self.assertNotIn("(No earlier beats in this chapter.)", prompt)
+        self.assertIn("(No later beats.)", prompt)
 
 
 class TempWorkspaceCase(unittest.TestCase):

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Shared chapter planning helpers and prompt builders."""
 from config import get_default_chapters, get_word_count_target
-from story_utils import parse_outline_entries, split_story_bible_and_outline
+from story_utils import parse_beats, parse_outline_entries, split_story_bible_and_outline
 
 
 def get_outline_entries_from_story_bible(story_bible_text):
@@ -57,6 +57,50 @@ def build_previous_outline_context(story_bible_text, chapter_number):
         ending = f" | ends: {entry.ending}" if entry.ending else ""
         lines.append(f"- Chapter {entry.number} — {entry.title}: {entry.summary}{ending}")
     return "\n".join(lines)
+
+
+def _compress_beat_text(beat_text, word_limit=24):
+    lines = [line.strip() for line in beat_text.splitlines() if line.strip()]
+    if not lines:
+        return ""
+
+    body_lines = lines[1:] if lines[0].startswith("### Beat ") else lines
+    body = " ".join(body_lines).strip()
+    if not body:
+        return lines[0]
+
+    words = body.split()
+    if len(words) <= word_limit:
+        return body
+    return " ".join(words[:word_limit]).strip() + " ..."
+
+
+def _build_block_beat_context(chapter_beats_text, block):
+    all_beats = parse_beats(chapter_beats_text)
+    if not all_beats:
+        return "(No chapter beats parsed.)", "", "(No later beats.)"
+
+    start_beat = int(block["start_beat"])
+    end_beat = int(block["end_beat"])
+
+    completed_lines = []
+    current_lines = []
+    upcoming_lines = []
+
+    for beat_number, beat_text in all_beats:
+        summary = _compress_beat_text(beat_text)
+        line = f"- Beat {beat_number}: {summary}"
+        if beat_number < start_beat:
+            completed_lines.append(line)
+        elif beat_number > end_beat:
+            upcoming_lines.append(line)
+        else:
+            current_lines.append(beat_text.strip())
+
+    completed_text = "\n".join(completed_lines) or "(No earlier beats in this chapter.)"
+    current_text = "\n\n".join(current_lines).strip()
+    upcoming_text = "\n".join(upcoming_lines) or "(No later beats.)"
+    return completed_text, current_text, upcoming_text
 
 
 def build_chapter_beats_prompt(
@@ -167,7 +211,10 @@ def build_scene_block_prompt(
         f"Chapter {entry.number} — {entry.title}" if entry else f"Chapter {chapter_number}"
     )
 
-    block_beats_text = "\n\n".join(text for _, text in block["beats"])
+    completed_beats_text, block_beats_text, upcoming_beats_text = _build_block_beat_context(
+        chapter_beats_text,
+        block,
+    )
     continuity_summary = prior_blocks_summary.strip() or "(This is the opening block.)"
     prior_tail = prior_text_tail.strip() or "(No prior prose yet.)"
 
@@ -179,11 +226,12 @@ STORY BIBLE:
 CURRENT STORY CONTEXT:
 {cumulative_summary}
 
-FULL CHAPTER BRIEF FOR {chapter_label}:
-{chapter_beats_text}
-
 OUTLINE SNAPSHOT:
 {build_outline_context(story_bible_text, chapter_number, window=1)}
+
+CHAPTER ROADMAP FOR {chapter_label}:
+COMPLETED BEATS (already covered; do not restage):
+{completed_beats_text}
 
 CURRENT BLOCK:
 - Block {block["index"]} of {total_blocks}
@@ -191,6 +239,9 @@ CURRENT BLOCK:
 
 BLOCK BEATS:
 {block_beats_text}
+
+UPCOMING BEATS (aim toward these, but do not fully cover them yet):
+{upcoming_beats_text}
 
 ALREADY WRITTEN IN THIS CHAPTER:
 {continuity_summary}
@@ -201,8 +252,11 @@ TAIL OF PREVIOUS BLOCK PROSE:
 WRITING INSTRUCTIONS:
 - Write only this block's prose
 - Start smoothly from the current chapter state; do not restart the chapter
+- Assume completed beats have already happened in prior prose; mention them only as aftermath or memory if needed
 - Cover the required turns from these beats, but write natural scene flow instead of beat labels
-- Preserve continuity with the prior prose and aim toward the later beats in the full chapter brief
+- Do not replay, paraphrase, or re-stage an earlier beat as if it is happening for the first time
+- Do not pull a full upcoming beat forward; at most, set it up lightly
+- Preserve continuity with the prior prose and aim toward the later beats in the roadmap
 - End this block at a strong handoff point for the next block unless this is the final block
 
 Output ONLY the prose for this block.
