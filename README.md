@@ -45,7 +45,7 @@ The current flow keeps beats as planning scaffolding but drafts the chapter in s
 - beats define intent, reversals, and ending targets
 - the writer combines multiple beats into a larger scene block
 - each block is generated with carry-forward context from earlier blocks
-- an optional final revision pass smooths transitions and repetition
+- optional revision and cleanup passes can smooth transitions or repair malformed output
 
 This keeps the planning layer useful without forcing the prose layer into artificial chunks.
 
@@ -56,6 +56,8 @@ python3 project.py init haunted_greenhouse
 python3 build_story_bible.py "your concept"
 python3 plan_chapters.py --beats
 python3 generate_chapter.py 1
+python3 generate_chapter.py 1 --revise
+python3 generate_chapter.py 1 --cleanup
 python3 summarize_chapter.py 1
 python3 status.py
 python3 compile.py --dry-run
@@ -66,7 +68,9 @@ Drafting controls:
 
 ```sh
 python3 generate_chapter.py 1 --beats-per-block 2
-python3 generate_chapter.py 1 --beats-per-block 1 --no-revise
+python3 generate_chapter.py 1 --beats-per-block 1
+python3 generate_chapter.py 1 --beats-per-block 2 --revise
+python3 generate_chapter.py 1 --beats-per-block 2 --cleanup --enforce-length
 ```
 
 Generate all sequentially:
@@ -94,6 +98,31 @@ That workflow now means:
 1. draft chapter
 2. summarize it
 3. generate the next chapter brief if missing
+
+## Thinking Models
+
+The local OpenAI-compatible path can work with thinking-capable models, including Qwen variants, as long as your server exposes the needed request flags.
+
+- Set `local_mode` to `true`
+- Point `local_model` at the model your server has loaded
+- Use `local_request_overrides` in `config.json` for provider-specific fields
+
+Example:
+
+```json
+{
+  "local_mode": true,
+  "local_endpoint": "http://localhost:8080",
+  "local_model": "qwen3-32b-thinking",
+  "local_request_overrides": {
+    "chat_template_kwargs": {
+      "enable_thinking": true
+    }
+  }
+}
+```
+
+The pipeline already strips `<think>`-style blocks from saved outputs and prefers the final answer text when the server streams reasoning separately.
 
 ## Quality Guardrails
 

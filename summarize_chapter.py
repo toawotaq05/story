@@ -39,6 +39,42 @@ def log(message, quiet=False):
         print(message)
 
 
+def build_summary_prompt(chapter, draft_content):
+    return f"""Chapter to summarize:
+
+---
+
+{draft_content}
+
+---
+
+Return a rough working summary for downstream story-state tracking.
+
+Rules:
+- Be literal and compressed, not polished
+- Do not rewrite the chapter as elegant prose
+- Prefer short bullet points over long sentences
+- Keep only durable facts needed for later continuity
+- Mention what changed, where characters ended up, and what remains unresolved
+
+Format your response EXACTLY as follows — do not add any preamble, commentary, or extra text:
+
+### Chapter {chapter} — [SHORT TITLE]
+- Sequence:
+  - [Plain fact about what happens first]
+  - [Plain fact about what happens next]
+  - [Plain fact about how the chapter ends]
+- Plot facts established:
+  - [Reveal, decision, event, or world fact that later chapters must remember]
+  - ...
+- Character end states:
+  - [Character name]: [location / emotional state / relationship change / immediate goal]
+  - ...
+- Open threads:
+  - [Unresolved question, threat, promise, or setup]
+  - ..."""
+
+
 def main():
     args = parse_args()
     chapter = int(args.chapter)
@@ -73,33 +109,10 @@ def main():
     log(f"=== Summarizing Chapter {chapter} ===\n", args.quiet)
 
     system_prompt = (
-        "You are a story analyst. Read the chapter draft below and produce a "
-        "structured summary. Follow the format exactly."
+        "You are a continuity tracker. Extract rough chapter state for later drafting. "
+        "Be factual, compressed, and utilitarian. Follow the format exactly."
     )
-    user_prompt = f"""Chapter to summarize:
-
----
-
-{draft_content}
-
----
-
-Format your response EXACTLY as follows — do not add any preamble, commentary, or extra text:
-
-### Chapter {chapter} — [TWO TO FOUR WORD CHAPTER TITLE]
-[4-6 sentences: what happens in order, key character decisions, setting details established, how the chapter ends and what it sets up for the next chapter]
-
-### Key Plot Points Established
-- [Important fact, reveal, or event established in this chapter]
-- ...
-
-### Character Status
-- [Character name]: [Their state at end of chapter — location, emotional state, relationship changes]
-- ...
-
-### Open Threads / Loose Ends
-- [Question raised, setup planted, or tension left unresolved]
-- ..."""
+    user_prompt = build_summary_prompt(chapter, draft_content)
 
     log("Summarizing chapter (streaming):", args.quiet)
     if not args.quiet:

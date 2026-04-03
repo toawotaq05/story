@@ -33,15 +33,16 @@ def resolve_project_dir(project_dir=None):
 
 
 def resolve_output_paths(project_dir, output_path=None):
+    book_name = os.path.basename(os.path.normpath(project_dir))
     if output_path:
         resolved = os.path.abspath(output_path)
         if os.path.isdir(resolved):
-            md_path = os.path.join(resolved, "book.md")
+            md_path = os.path.join(resolved, book_name + ".md")
         else:
             base, ext = os.path.splitext(resolved)
             md_path = resolved if ext.lower() == ".md" else resolved + ".md"
     else:
-        md_path = os.path.join(project_dir, "book.md")
+        md_path = os.path.join(project_dir, book_name + ".md")
 
     base, _ = os.path.splitext(md_path)
     epub_path = base + ".epub"

@@ -14,7 +14,13 @@ import re
 
 # Add parent dir to path so we can import config
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import is_local_mode, get_local_endpoint, get_local_model
+from config import (
+    get_local_endpoint,
+    get_local_model,
+    get_local_request_overrides,
+    is_local_mode,
+)
+from text_quality import looks_like_runaway_repetition
 
 
 def _strip_thinking_tags(text):
@@ -41,6 +47,31 @@ def _strip_thinking_tags(text):
         text = re.sub(pattern, '', text, flags=re.DOTALL)
 
     return text
+
+
+def _new_loop_detector():
+    return {"triggers": 0, "words_seen": 0, "next_check": 160}
+
+
+def _update_loop_detector(loop_detector, content, output_chunks, max_words):
+    if not loop_detector or not max_words:
+        return False
+
+    loop_detector["words_seen"] += len(content.split())
+    if loop_detector["words_seen"] < loop_detector["next_check"]:
+        return False
+
+    recent_text = "".join(output_chunks)[-8000:]
+    looks_repetitive = looks_like_runaway_repetition(recent_text)
+    if looks_repetitive:
+        loop_detector["triggers"] += 2
+    if loop_detector["words_seen"] > max_words * 2.0 and looks_repetitive:
+        loop_detector["triggers"] += 4
+    elif loop_detector["words_seen"] > max_words * 2.5:
+        loop_detector["triggers"] += 4
+
+    loop_detector["next_check"] += 80
+    return loop_detector["triggers"] >= 10
 
 
 def stream_llm(prompt, model=None, system="", silent=False, max_words=None, loop_detection=True):
@@ -71,6 +102,17 @@ def stream_llm(prompt, model=None, system="", silent=False, max_words=None, loop
         return _stream_remote(prompt, model=model, system=system, silent=silent)
 
 
+def _merge_payload(base, overrides):
+    """Recursively merge config-provided local request overrides into a payload."""
+    merged = dict(base)
+    for key, value in (overrides or {}).items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_payload(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
 def _stream_local(prompt, model=None, system="", silent=False, retries=3, backoff=2,
                   max_words=None, loop_detection=True):
     """Call the local llama.cpp server via HTTP with streaming output.
@@ -80,9 +122,6 @@ def _stream_local(prompt, model=None, system="", silent=False, retries=3, backof
         loop_detection: If True, monitors for repetitive n-gram loops and stops early
     """
     import requests
-    import re
-    from collections import deque
-
     endpoint = get_local_endpoint()
     model_id = get_local_model()
 
@@ -110,6 +149,7 @@ def _stream_local(prompt, model=None, system="", silent=False, retries=3, backof
         "max_tokens": max_tokens,
         "stream": True,
     }
+    payload = _merge_payload(payload, get_local_request_overrides())
 
     for attempt in range(retries):
         if attempt > 0:
@@ -135,11 +175,7 @@ def _stream_local(prompt, model=None, system="", silent=False, retries=3, backof
             # Process response with loop detection
             output = []
             reasoning = []  # Track reasoning separately — don't include in final output
-            loop_detector = None
-            if loop_detection:
-                # Simple n-gram based loop detection: track recent 3-word sequences
-                # If a sequence repeats 8+ times, likely in a loop
-                loop_detector = {"recent": deque(maxlen=100), "triggers": 0}
+            loop_detector = _new_loop_detector() if loop_detection else None
 
             loop_detected_flag = False
             for line in r.iter_lines():
@@ -164,23 +200,12 @@ def _stream_local(prompt, model=None, system="", silent=False, retries=3, backof
                         output.append(content)
 
                         # Loop detection
-                        if loop_detector and max_words:  # Only for bounded generations
-                            words = content.split()
-                            if len(words) >= 3:
-                                for i in range(len(words) - 2):
-                                    trigram = tuple(words[i:i+3])
-                                    loop_detector["recent"].append(trigram)
-                                    # Count occurrences in last 50 trigrams
-                                    if loop_detector["recent"].count(trigram) > 6:
-                                        loop_detector["triggers"] += 1
-                                        if loop_detector["triggers"] > 10:
-                                            if not silent:
-                                                print("\n[!] Loop detected - stopping generation early")
-                                            loop_detected_flag = True
-                                            r.close()
-                                            break  # break inner trigram loop
-                                if loop_detected_flag:
-                                    break  # break outer line loop
+                        if _update_loop_detector(loop_detector, content, output, max_words):
+                            if not silent:
+                                print("\n[!] Loop detected - stopping generation early")
+                            loop_detected_flag = True
+                            r.close()
+                            break
                     elif reason:
                         reasoning.append(reason)
                 except Exception:

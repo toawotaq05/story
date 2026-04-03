@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Shared chapter planning helpers and prompt builders."""
+import re
+
 from config import get_default_chapters, get_word_count_target
 from story_utils import parse_beats, parse_outline_entries, split_story_bible_and_outline
 
@@ -150,7 +152,7 @@ INSTRUCTIONS:
 - Keep it concrete enough to draft prose from directly
 - Use 4-6 beats if needed, but combine or compress where pacing wants it
 - Each beat should describe intent, escalation, and important character turns
-- Include specific settings, reversals, and emotional shifts
+- Include specific settings, sexual acts, reversals, and emotional shifts
 - Do not reuse the previous chapter's formatting quirks verbatim
 - Align the final beat with this handoff: {next_hint}
 """
@@ -195,6 +197,49 @@ Output ONLY the chapter text.
 """
 
 
+def build_block_system_prompt(system_prompt, block_target_words):
+    prompt = system_prompt
+    replacements = [
+        (
+            "Write the chapter in an immersive, polished voice that matches the tone described in the story bible, embracing raw sensuality and explicit eroticism whenever intimacy or desire appears.",
+            "Write only the current scene block of the chapter in an immersive, polished voice that matches the tone described in the story bible, embracing raw sensuality and explicit eroticism whenever intimacy or desire appears.",
+        ),
+        (
+            "- Begin the chapter immediately: no title cards, no \"Chapter X\" headers, no summaries before the prose",
+            "- Continue the chapter from the current moment: no restarts, no title cards, no \"Chapter X\" headers, no summaries before the prose",
+        ),
+        (
+            "- End where the brief says the chapter should end; do not add teaser notes or meta commentary",
+            "- End this block at a natural continuation point unless the user prompt says this is the final block; do not add teaser notes or meta commentary",
+        ),
+        (
+            "After writing the chapter, output ONLY the chapter text.",
+            "After writing this block, output ONLY the block prose.",
+        ),
+    ]
+    for old, new in replacements:
+        prompt = prompt.replace(old, new)
+
+    prompt = re.sub(
+        r"(?m)^- Target approximately .* words,.*$",
+        (
+            f"- Target approximately {block_target_words:,} words for this block, "
+            "expanding only the scenes that belong in this block."
+        ),
+        prompt,
+    )
+    prompt = re.sub(
+        r"(?m)^- If you are ending too early,.*$",
+        (
+            "- If you are ending too early, deepen only the active scene material for this "
+            "block with concrete action, dialogue, and interiority rather than restarting "
+            "earlier chapter material."
+        ),
+        prompt,
+    )
+    return prompt
+
+
 def build_scene_block_prompt(
     story_bible_text,
     cumulative_summary,
@@ -202,6 +247,7 @@ def build_scene_block_prompt(
     system_prompt,
     chapter_number,
     block,
+    block_target_words=None,
     prior_blocks_summary="",
     prior_text_tail="",
     total_blocks=1,
@@ -236,6 +282,7 @@ COMPLETED BEATS (already covered; do not restage):
 CURRENT BLOCK:
 - Block {block["index"]} of {total_blocks}
 - Covers beats {block["start_beat"]}-{block["end_beat"]}
+{"- Target length: about " + format(block_target_words, ",") + " words" if block_target_words else ""}
 
 BLOCK BEATS:
 {block_beats_text}

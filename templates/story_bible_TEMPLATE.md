@@ -113,7 +113,8 @@
 
 #### What to Emphasize
 - [Concrete sensory details the protagonist would notice]
-- [Growth through struggle, not through inspiration alone]
+- [Growth through struggle, not through inspiration alone]i
+- [Specific sexual acts taking place]
 - [Dialogue that reveals character and advances plot simultaneously]
 - [Specific details that make this world feel real and lived-in]
 
@@ -152,7 +153,7 @@
 
 # Chapter Outline
 
-[This section is optional — the LLM can fill it in if needed. It lists the planned chapters with brief descriptions of each chapter's events and ending hook.]
+[This section is required. List every planned chapter with a brief description of that chapter's events and ending hook.]
 
 1. **Chapter 1 — [TITLE]** — [1-2 sentence summary] → ends: [Hook or cliffhanger ending]
 2. **Chapter 2 — [TITLE]** — [1-2 sentence summary] → ends: [Hook or cliffhanger ending]

@@ -15,6 +15,7 @@ import sys
 from datetime import datetime
 
 from chapter_planning import (
+    build_block_system_prompt,
     build_chapter_beats_prompt,
     build_chapter_cleanup_prompt,
     build_chapter_revision_prompt,
@@ -24,6 +25,7 @@ from chapter_planning import (
     get_total_chapters,
 )
 from config import get_model
+from config import is_chapter_length_enforced
 from dual_llm import stream_llm
 from paths import (
     CHAPTERS_DIR,
@@ -44,13 +46,22 @@ from story_utils import (
     is_valid_beats_document,
     parse_beats,
 )
+from text_quality import compression_ratio, max_ngram_repetition_ratio
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CHAPTER_MIN_RATIO = 0.8
-CHAPTER_MAX_RATIO = 1.2
+CHAPTER_MIN_RATIO = 0.6
+CHAPTER_MAX_RATIO = 1.35
 META_NARRATION_PATTERNS = [
     re.compile(r"\bthe chapter (?:ends|ended|concludes|concluded)\b", re.IGNORECASE),
     re.compile(r"\bthis chapter\b", re.IGNORECASE),
+]
+STRUCTURAL_LEAK_PATTERNS = [
+    re.compile(r"(?mi)^#{1,6}\s*chapter\b"),
+    re.compile(r"(?mi)^#{1,6}\s*beat\b"),
+    re.compile(r"(?mi)^##\s*beat\b"),
+    re.compile(r"(?mi)^###\s*word count\b"),
+    re.compile(r"(?mi)^###\s*notes\b"),
+    re.compile(r"(?mi)^-\s+the chapter\b"),
 ]
 
 
@@ -128,20 +139,25 @@ def normalized_paragraphs(text):
     return paragraphs
 
 
-def find_quality_issues(text, target_words_total):
+def find_quality_issues(text, target_words_total, enforce_length=False):
     issues = []
     word_count = len(text.split())
     min_words = max(int(target_words_total * CHAPTER_MIN_RATIO), 1)
     max_words = max(int(target_words_total * CHAPTER_MAX_RATIO), min_words)
 
-    if word_count < min_words:
+    if enforce_length and word_count < min_words:
         issues.append(
             f"Too short: {word_count:,} words. Expand to at least {min_words:,} words."
         )
-    if word_count > max_words:
+    if enforce_length and word_count > max_words:
         issues.append(
             f"Too long: {word_count:,} words. Compress to at most {max_words:,} words."
         )
+
+    for pattern in STRUCTURAL_LEAK_PATTERNS:
+        if pattern.search(text):
+            issues.append("Contains outline/beat/note formatting instead of clean chapter prose.")
+            break
 
     for pattern in META_NARRATION_PATTERNS:
         if pattern.search(text):
@@ -160,7 +176,71 @@ def find_quality_issues(text, target_words_total):
             f"Contains repeated long paragraph material ({duplicate_count} repeated section(s))."
         )
 
+    repetition_ratio = max_ngram_repetition_ratio(text, n=3, max_words=240)
+    compression_ratio_value = compression_ratio(text, max_chars=4000)
+    if repetition_ratio >= 0.24:
+        issues.append(
+            f"Contains suspicious short-range repetition (3-gram ratio {repetition_ratio:.2f})."
+        )
+    elif word_count >= 180 and compression_ratio_value <= 0.30:
+        issues.append(
+            f"Compresses too well for natural prose (ratio {compression_ratio_value:.2f}); likely looping or repetitive."
+        )
+
     return issues
+
+
+def summarize_retry_reasons(issues, limit=3):
+    if not issues:
+        return "no specific issues recorded"
+    return "; ".join(issues[:limit])
+
+
+def recover_final_chapter_text(
+    chapter_text,
+    story_bible_text,
+    cumulative_content,
+    chapter_beats_text,
+    prepared_system_prompt,
+    chapter,
+    target_words_total,
+    enforce_length=False,
+    silent=False,
+):
+    min_words = max(int(target_words_total * CHAPTER_MIN_RATIO), 1)
+    max_words = max(int(target_words_total * CHAPTER_MAX_RATIO), min_words)
+    issues = find_quality_issues(
+        chapter_text,
+        target_words_total,
+        enforce_length=enforce_length,
+    )
+    if not issues:
+        return chapter_text
+
+    recovery_prompt = build_chapter_cleanup_prompt(
+        story_bible_text,
+        cumulative_content,
+        chapter_beats_text,
+        prepared_system_prompt,
+        chapter,
+        chapter_text,
+        target_words_total,
+        min_words,
+        max_words,
+        issues + [
+            "Do not use chapter headings, beat headings, markdown notes, or word-count sections.",
+            "Return only continuous chapter prose.",
+        ],
+    )
+    recovery_max_words = min(max_words + 600, 12000)
+    return stream_llm(
+        recovery_prompt,
+        model=get_model("write"),
+        system="",
+        silent=silent,
+        max_words=recovery_max_words,
+        loop_detection=True,
+    )
 
 
 def clean_chapter_text(
@@ -171,6 +251,7 @@ def clean_chapter_text(
     prepared_system_prompt,
     chapter,
     target_words_total,
+    enforce_length=False,
     silent=False,
 ):
     min_words = max(int(target_words_total * CHAPTER_MIN_RATIO), 1)
@@ -178,14 +259,22 @@ def clean_chapter_text(
 
     current_text = chapter_text
     passes = []
-    for _ in range(2):
-        issues = find_quality_issues(current_text, target_words_total)
+    for _ in range(1):
+        issues = find_quality_issues(
+            current_text,
+            target_words_total,
+            enforce_length=enforce_length,
+        )
         if not issues:
             return current_text, passes
 
+        reason_summary = summarize_retry_reasons(issues)
+        if not silent:
+            print(f"Cleanup pass {len(passes) + 1} triggered: {reason_summary}")
         passes.append(
             {
                 "issues": issues,
+                "reason_summary": reason_summary,
                 "word_count_before": len(current_text.split()),
             }
         )
@@ -215,7 +304,16 @@ def clean_chapter_text(
     return current_text, passes
 
 
-def generate_chapter(chapter, script_dir, silent=False, output_file=None, beats_per_block=2, revise=True):
+def generate_chapter(
+    chapter,
+    script_dir,
+    silent=False,
+    output_file=None,
+    beats_per_block=2,
+    revise=False,
+    enforce_length=None,
+    cleanup=False,
+):
     ensure_runtime_dirs()
     story_bible = STORY_BIBLE_PATH
     chapter_brief = chapter_beats_path(chapter)
@@ -239,6 +337,8 @@ def generate_chapter(chapter, script_dir, silent=False, output_file=None, beats_
         sys.exit(1)
 
     prepared_system_prompt, target_words_total = prepare_system_prompt(system_prompt, story_bible_text)
+    if enforce_length is None:
+        enforce_length = is_chapter_length_enforced()
     chapter_entry = find_chapter_entry(story_bible_text, chapter)
     chapter_title = chapter_entry.title if chapter_entry else f"Chapter {chapter}"
     beats = parse_beats(chapter_beats_text)
@@ -258,6 +358,7 @@ def generate_chapter(chapter, script_dir, silent=False, output_file=None, beats_
     block_texts = []
     block_word_counts = []
     prior_block_summaries = []
+    regeneration_events = []
 
     for block in blocks:
         if not silent:
@@ -268,13 +369,23 @@ def generate_chapter(chapter, script_dir, silent=False, output_file=None, beats_
 
         prior_summary = "\n\n".join(prior_block_summaries)
         prior_tail = tail_text(block_texts[-1]) if block_texts else ""
+        beats_in_block = max(len(block.get("beats", [])), 1)
+        block_target_for_prompt = max(
+            block_target_words,
+            int(block_target_words * (beats_in_block / max(beats_per_block, 1))),
+        )
+        block_system_prompt = build_block_system_prompt(
+            prepared_system_prompt,
+            block_target_for_prompt,
+        )
         block_prompt = build_scene_block_prompt(
             story_bible_text,
             cumulative_content,
             chapter_beats_text,
-            prepared_system_prompt,
+            block_system_prompt,
             chapter,
             block,
+            block_target_words=block_target_for_prompt,
             prior_blocks_summary=prior_summary,
             prior_text_tail=prior_tail,
             total_blocks=len(blocks),
@@ -321,16 +432,84 @@ def generate_chapter(chapter, script_dir, silent=False, output_file=None, beats_
     else:
         chapter_text = assembled_text
 
-    chapter_text, cleanup_passes = clean_chapter_text(
+    cleanup_passes = []
+    if cleanup:
+        chapter_text, cleanup_passes = clean_chapter_text(
+            chapter_text,
+            story_bible_text,
+            cumulative_content,
+            chapter_beats_text,
+            prepared_system_prompt,
+            chapter,
+            target_words_total,
+            enforce_length=enforce_length,
+            silent=silent,
+        )
+
+    final_issues = find_quality_issues(
         chapter_text,
-        story_bible_text,
-        cumulative_content,
-        chapter_beats_text,
-        prepared_system_prompt,
-        chapter,
         target_words_total,
-        silent=silent,
+        enforce_length=enforce_length,
     )
+    has_structural_leak = any(pattern.search(chapter_text) for pattern in STRUCTURAL_LEAK_PATTERNS)
+    has_meta_narration = any(pattern.search(chapter_text) for pattern in META_NARRATION_PATTERNS)
+    severe_final_issues = [
+        issue for issue in final_issues
+        if "outline/beat/note formatting" in issue.lower()
+        or "meta narration" in issue.lower()
+    ]
+    if cleanup and (severe_final_issues or has_structural_leak or has_meta_narration):
+        recovery_reason = summarize_retry_reasons(severe_final_issues or final_issues)
+        regeneration_events.append(f"Final recovery triggered: {recovery_reason}")
+        if not silent:
+            print(
+                "Final draft still has blocking quality issues; attempting one final recovery pass..."
+            )
+            print(f"  Reason: {recovery_reason}")
+        chapter_text = recover_final_chapter_text(
+            chapter_text,
+            story_bible_text,
+            cumulative_content,
+            chapter_beats_text,
+            prepared_system_prompt,
+            chapter,
+            target_words_total,
+            enforce_length=enforce_length,
+            silent=silent,
+        )
+        recovered_issues = find_quality_issues(
+            chapter_text,
+            target_words_total,
+            enforce_length=enforce_length,
+        )
+        recovered_has_structural_leak = any(pattern.search(chapter_text) for pattern in STRUCTURAL_LEAK_PATTERNS)
+        recovered_has_meta_narration = any(pattern.search(chapter_text) for pattern in META_NARRATION_PATTERNS)
+        severe_recovered_issues = [
+            issue for issue in recovered_issues
+            if "outline/beat/note formatting" in issue.lower()
+            or "meta narration" in issue.lower()
+        ]
+        if severe_recovered_issues or recovered_has_structural_leak or recovered_has_meta_narration:
+            print(
+                f"ERROR: Final chapter draft for chapter {chapter} is still invalid: "
+                + "; ".join((severe_recovered_issues or ["Malformed chapter structure remains after recovery."])[:3])
+            )
+            sys.exit(1)
+        final_issues = recovered_issues
+
+    if final_issues and not silent:
+        warning_label = (
+            "WARNING: Final chapter draft has non-blocking quality issues: "
+            if cleanup else
+            "WARNING: Writing permissive draft with quality issues: "
+        )
+        print(warning_label + "; ".join(final_issues[:3]))
+
+    if cleanup_passes:
+        for index, cleanup in enumerate(cleanup_passes, start=1):
+            regeneration_events.append(
+                f"Cleanup pass {index} triggered: {cleanup.get('reason_summary', summarize_retry_reasons(cleanup['issues']))}"
+            )
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     metadata = (
@@ -360,10 +539,16 @@ def generate_chapter(chapter, script_dir, silent=False, output_file=None, beats_
             f"Blocks: {len(blocks)}\n"
             f"Block word counts: {', '.join(str(count) for count in block_word_counts)}\n"
             f"Revision pass: {'yes' if revise else 'no'}\n"
+            f"Length enforcement: {'yes' if enforce_length else 'no'}\n"
+            f"Cleanup enforcement: {'yes' if cleanup else 'no'}\n"
             f"Cleanup passes: {len(cleanup_passes)}\n"
             f"Brief file: {os.path.basename(chapter_brief)}\n"
             f"Draft file: {os.path.basename(output_path)}\n"
         )
+        if regeneration_events:
+            f.write("\nRegeneration events:\n")
+            for event in regeneration_events:
+                f.write(f"- {event}\n")
         for index, cleanup in enumerate(cleanup_passes, start=1):
             f.write(
                 f"\nCleanup pass {index}: {cleanup['word_count_before']:,} -> "
@@ -441,7 +626,15 @@ def generate_next_chapter_beats(chapter):
     return next_beats
 
 
-def generate_all_sequential(script_dir, skip_existing=True, silent=False, beats_per_block=2, revise=True):
+def generate_all_sequential(
+    script_dir,
+    skip_existing=True,
+    silent=False,
+    beats_per_block=2,
+    revise=False,
+    enforce_length=None,
+    cleanup=False,
+):
     chapters_dir = CHAPTERS_DIR
     beats_files = sorted(
         glob.glob(os.path.join(chapters_dir, "chapter_*_beats.md")),
@@ -500,6 +693,8 @@ def generate_all_sequential(script_dir, skip_existing=True, silent=False, beats_
                 silent=silent,
                 beats_per_block=beats_per_block,
                 revise=revise,
+                enforce_length=enforce_length,
+                cleanup=cleanup,
             )
             print(f"  ✓ {os.path.basename(path)} written ({word_count:,} words)")
 
@@ -555,10 +750,40 @@ def main():
         help="How many beats to combine into each draft block (default: 2)",
     )
     parser.add_argument(
+        "--revise",
+        action="store_true",
+        default=False,
+        help="Run the final chapter-level smoothing pass",
+    )
+    parser.add_argument(
         "--no-revise",
         action="store_false",
         dest="revise",
         help="Skip the final chapter-level smoothing pass",
+    )
+    parser.add_argument(
+        "--enforce-length",
+        action="store_true",
+        default=None,
+        help="Enable chapter-length cleanup/retry checks",
+    )
+    parser.add_argument(
+        "--no-enforce-length",
+        action="store_false",
+        dest="enforce_length",
+        help="Disable chapter-length cleanup/retry checks",
+    )
+    parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        default=False,
+        help="Enable chapter cleanup/recovery passes and blocking structural validation",
+    )
+    parser.add_argument(
+        "--no-cleanup",
+        action="store_false",
+        dest="cleanup",
+        help="Disable chapter cleanup/recovery passes and write drafts permissively",
     )
     parser.add_argument(
         "--skip-existing",
@@ -581,6 +806,8 @@ def main():
             silent=args.silent,
             beats_per_block=args.beats_per_block,
             revise=args.revise,
+            enforce_length=args.enforce_length,
+            cleanup=args.cleanup,
         )
         return
 
@@ -594,6 +821,8 @@ def main():
         output_file=args.output,
         beats_per_block=args.beats_per_block,
         revise=args.revise,
+        enforce_length=args.enforce_length,
+        cleanup=args.cleanup,
     )
     print(f"Wrote {output_path} ({word_count:,} words)")
 

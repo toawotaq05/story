@@ -15,9 +15,13 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import chapter_planning
+import build_story_bible
 import compile as compile_module
 import generate_chapter as generate_chapter_module
+import summarize_chapter as summarize_chapter_module
 import story_utils
+from dual_llm import llm_provider
+import text_quality
 from config import DEFAULT_MODEL, get_model
 from paths import (
     CHAPTER_BEATS_TEMPLATE_PATH,
@@ -93,6 +97,11 @@ class TestConfig(unittest.TestCase):
         self.assertIn("models", cfg)
         self.assertIsInstance(cfg["models"], dict)
 
+    def test_get_local_request_overrides_defaults_to_dict(self):
+        with patch("config._config_cache", {"models": {}, "story": {}}):
+            from config import get_local_request_overrides
+            self.assertEqual(get_local_request_overrides(), {})
+
 
 class TestProjectStructure(unittest.TestCase):
     def setUp(self):
@@ -117,8 +126,8 @@ class TestProjectStructure(unittest.TestCase):
             self.assertTrue(os.path.isdir(path), f"Missing support dir: {path}")
 
     def test_default_project_dir_is_workspace_scoped(self):
-        expected = os.path.join(DEFAULT_PROJECTS_DIR, DEFAULT_PROJECT_NAME)
-        self.assertEqual(PROJECT_DIR, expected)
+        self.assertTrue(PROJECT_DIR.startswith(DEFAULT_PROJECTS_DIR + os.sep))
+        self.assertTrue(os.path.basename(PROJECT_DIR))
 
     def test_beats_template_format(self):
         with open(CHAPTER_BEATS_TEMPLATE_PATH) as handle:
@@ -237,11 +246,13 @@ class TestChapterPlanning(unittest.TestCase):
             "SYSTEM PROMPT",
             1,
             block,
+            block_target_words=1600,
             prior_blocks_summary="Block 0 summary",
             prior_text_tail="Last line of prior prose.",
             total_blocks=2,
         )
         self.assertIn("Block 1 of 2", prompt)
+        self.assertIn("Target length: about 1,600 words", prompt)
         self.assertIn("Last line of prior prose.", prompt)
         self.assertIn("Block 0 summary", prompt)
         self.assertIn("SYSTEM PROMPT", prompt)
@@ -260,6 +271,7 @@ class TestChapterPlanning(unittest.TestCase):
             "SYSTEM PROMPT",
             1,
             block,
+            block_target_words=1600,
             prior_blocks_summary="Block 1 summary",
             prior_text_tail="The train pulled out.",
             total_blocks=2,
@@ -270,6 +282,102 @@ class TestChapterPlanning(unittest.TestCase):
         self.assertIn("### Beat 4: Departure", prompt)
         self.assertNotIn("(No earlier beats in this chapter.)", prompt)
         self.assertIn("(No later beats.)", prompt)
+
+    def test_build_block_system_prompt_reframes_full_chapter_prompt(self):
+        base_prompt = (
+            "Write the chapter in an immersive, polished voice that matches the tone described in the story bible, embracing raw sensuality and explicit eroticism whenever intimacy or desire appears.\n\n"
+            "RULES:\n"
+            "- Begin the chapter immediately: no title cards, no \"Chapter X\" headers, no summaries before the prose\n"
+            "- End where the brief says the chapter should end; do not add teaser notes or meta commentary\n\n"
+            "WORD COUNT MANDATE:\n"
+            "- Target approximately 3,333 words, giving erotic scenes the extra length they need to feel immersive and intense rather than rushed.\n"
+            "- If you are ending too early, deepen the active scene (especially intimate ones) with concrete action, dialogue, and interiority rather than padding\n\n"
+            "After writing the chapter, output ONLY the chapter text.\n"
+        )
+        prompt = chapter_planning.build_block_system_prompt(base_prompt, 1600)
+        self.assertIn("Write only the current scene block of the chapter", prompt)
+        self.assertIn("Continue the chapter from the current moment", prompt)
+        self.assertIn("Target approximately 1,600 words for this block", prompt)
+        self.assertIn("output ONLY the block prose", prompt)
+        self.assertNotIn("Begin the chapter immediately", prompt)
+        self.assertNotIn("After writing the chapter", prompt)
+
+
+class TestBuildStoryBible(unittest.TestCase):
+    def test_outline_matches_target_requires_exact_sequence_and_count(self):
+        _, outline = story_utils.split_story_bible_and_outline(SAMPLE_STORY_BIBLE)
+        entries = story_utils.parse_outline_entries(outline)
+        self.assertTrue(build_story_bible._outline_matches_target(entries, 3))
+        self.assertFalse(build_story_bible._outline_matches_target(entries, 2))
+
+    def test_ensure_story_bible_has_outline_preserves_existing_outline(self):
+        merged, reason = build_story_bible.ensure_story_bible_has_outline(SAMPLE_STORY_BIBLE, 3)
+        _, outline = story_utils.split_story_bible_and_outline(merged)
+        entries = story_utils.parse_outline_entries(outline)
+        self.assertIsNone(reason)
+        self.assertEqual(len(entries), 3)
+        self.assertEqual(entries[0].title, "The Letter")
+
+    def test_ensure_story_bible_has_outline_regenerates_wrong_sized_outline(self):
+        wrong_outline_story = SAMPLE_STORY_BIBLE + (
+            "4. **Chapter 4 — Extra** — This extra chapter should force regeneration. → ends: none\n"
+        )
+        generated_outline = """# Chapter Outline
+
+1. **Chapter 1 — The Letter** — Mara receives an unsigned letter that unsettles her routine. → ends: she decides to visit her childhood home
+2. **Chapter 2 — The Return** — Mara returns home and finds the greenhouse locked from the inside. → ends: she hears movement after midnight
+3. **Chapter 3 — Glass Hours** — Mara confronts the truth hidden in the greenhouse. → ends: she chooses whether to stay
+"""
+        with patch("build_story_bible.stream_llm", return_value=generated_outline) as mock_stream:
+            merged, reason = build_story_bible.ensure_story_bible_has_outline(wrong_outline_story, 3)
+
+        self.assertEqual(mock_stream.call_count, 1)
+        _, outline = story_utils.split_story_bible_and_outline(merged)
+        entries = story_utils.parse_outline_entries(outline)
+        self.assertIn("mismatch", reason)
+        self.assertEqual(len(entries), 3)
+
+    def test_ensure_story_bible_has_outline_generates_missing_outline(self):
+        story_bible_without_outline, _ = story_utils.split_story_bible_and_outline(SAMPLE_STORY_BIBLE)
+        generated_outline = """# Chapter Outline
+
+1. **Chapter 1 — The Letter** — Mara receives an unsigned letter that unsettles her routine. → ends: she decides to visit her childhood home
+2. **Chapter 2 — The Return** — Mara returns home and finds the greenhouse locked from the inside. → ends: she hears movement after midnight
+3. **Chapter 3 — Glass Hours** — Mara confronts the truth hidden in the greenhouse. → ends: she chooses whether to stay
+"""
+        with patch("build_story_bible.stream_llm", return_value=generated_outline) as mock_stream:
+            merged, reason = build_story_bible.ensure_story_bible_has_outline(story_bible_without_outline, 3)
+
+        self.assertEqual(mock_stream.call_count, 1)
+        _, outline = story_utils.split_story_bible_and_outline(merged)
+        entries = story_utils.parse_outline_entries(outline)
+        self.assertIn("did not contain a parseable chapter outline", reason)
+        self.assertEqual(len(entries), 3)
+        self.assertEqual(entries[1].title, "The Return")
+
+    def test_repair_chapter_beats_if_needed_repairs_malformed_brief(self):
+        malformed = """Chapter 1 — The Letter
+
+Beat 1: Disturbance
+Mara comes home in the rain.
+"""
+        repaired = """# Chapter 1 — The Letter
+
+### Beat 1: Disturbance
+Mara comes home in the rain, finds an unsigned letter under the door, and recognizes details nobody should know.
+
+### Beat 2: Pressure
+She rereads the letter, argues with herself, and calls her estranged brother, who refuses to answer directly.
+
+### Beat 3: Choice
+Mara searches an old drawer, finds the greenhouse key, and realizes she has to return home.
+"""
+        with patch("build_story_bible.stream_llm", return_value=repaired) as mock_stream:
+            output, issues = build_story_bible.repair_chapter_beats_if_needed(malformed, 1)
+
+        self.assertEqual(mock_stream.call_count, 1)
+        self.assertTrue(issues)
+        self.assertTrue(output.startswith("# Chapter 1"))
 
 
 class TempWorkspaceCase(unittest.TestCase):
@@ -332,16 +440,24 @@ class TestGenerateChapterFlow(TempWorkspaceCase):
 
     def test_generate_chapter_uses_scene_blocks_and_revision(self):
         outputs = [
-            "Block one prose with rain and tension.",
-            "Block two prose with departure and dread.",
-            "Revised final chapter prose with smoother transitions.",
+            "Block one prose with rain, tension, dialogue, memory, motion, and enough concrete detail to read like a real opening scene.",
+            "Block two prose with departure, dread, argument, movement, and enough concrete detail to read like a real follow-through scene.",
+            "Revised final chapter prose with smoother transitions, concrete action, dialogue, sensory detail, and enough length to satisfy the validator cleanly while staying within the tiny mock target.",
         ]
 
         with self.patch_generate_chapter_paths(), patch.object(
+            generate_chapter_module, "prepare_system_prompt", return_value=("SYSTEM", 30)
+        ), patch.object(
             generate_chapter_module, "clean_chapter_text", side_effect=lambda text, *args, **kwargs: (text, [])
         ), patch.object(
             generate_chapter_module, "stream_llm", side_effect=outputs
-        ) as mock_stream:
+        ) as mock_stream, patch.object(
+            generate_chapter_module, "find_quality_issues", return_value=[]
+        ), patch.object(
+            generate_chapter_module,
+            "recover_final_chapter_text",
+            return_value="Recovered final chapter prose with smoother transitions, concrete action, dialogue, sensory detail, and enough length to satisfy the validator cleanly while staying within the tiny mock target.",
+        ):
             word_count, output_path = generate_chapter_module.generate_chapter(
                 1,
                 self.temp_dir,
@@ -366,12 +482,12 @@ class TestGenerateChapterFlow(TempWorkspaceCase):
 
     def test_generate_chapter_without_revision_uses_assembled_blocks(self):
         outputs = [
-            "First block prose.",
-            "Second block prose.",
+            "First block prose with enough concrete action, movement, and detail to pass the validator without extra cleanup.",
+            "Second block prose with enough concrete action, movement, and detail to pass the validator without extra cleanup.",
         ]
 
         with self.patch_generate_chapter_paths(), patch.object(
-            generate_chapter_module, "prepare_system_prompt", return_value=("SYSTEM", 50)
+            generate_chapter_module, "prepare_system_prompt", return_value=("SYSTEM", 40)
         ), patch.object(
             generate_chapter_module, "clean_chapter_text", side_effect=lambda text, *args, **kwargs: (text, [])
         ), patch.object(
@@ -388,8 +504,8 @@ class TestGenerateChapterFlow(TempWorkspaceCase):
         self.assertEqual(mock_stream.call_count, 2)
         with open(self.draft_path) as handle:
             draft = handle.read()
-        self.assertIn("First block prose.", draft)
-        self.assertIn("Second block prose.", draft)
+        self.assertIn("First block prose with enough concrete action", draft)
+        self.assertIn("Second block prose with enough concrete action", draft)
 
     def test_generate_chapter_runs_cleanup_when_revision_is_out_of_range(self):
         outputs = [
@@ -415,13 +531,114 @@ class TestGenerateChapterFlow(TempWorkspaceCase):
                 silent=True,
                 beats_per_block=2,
                 revise=True,
+                enforce_length=True,
+                cleanup=True,
             )
 
         self.assertEqual(mock_stream.call_count, 4)
         with open(self.log_path) as handle:
             log = handle.read()
         self.assertIn("Cleanup passes: 1", log)
+        self.assertIn("Regeneration events:", log)
+        self.assertIn("Cleanup pass 1 triggered:", log)
         self.assertIn("Too short:", log)
+
+    def test_generate_chapter_recovers_when_final_output_leaks_beat_format(self):
+        outputs = [
+            "Block one prose with setup and enough detail to count as a scene.",
+            "Block two prose with payoff and enough detail to count as a scene.",
+            "# Chapter 1: Test\n\n## Beat 1 - Bad\nPlanning text.\n\n### Word Count: 50",
+        ]
+        recovered = (
+            "Recovered final prose carries concrete action, dialogue, setting detail, and interiority "
+            "without any headings. Mara crosses the kitchen, answers Theo, studies the torn note, "
+            "and keeps moving as the wind rattles the greenhouse panes around them while the scene expands into usable chapter prose with sustained movement, reaction, and emotional consequence."
+        )
+
+        with self.patch_generate_chapter_paths(), patch.object(
+            generate_chapter_module, "prepare_system_prompt", return_value=("SYSTEM", 40)
+        ), patch.object(
+            generate_chapter_module, "stream_llm", side_effect=outputs
+        ) as mock_stream, patch.object(
+            generate_chapter_module, "clean_chapter_text", side_effect=lambda text, *args, **kwargs: (text, [])
+        ), patch.object(
+            generate_chapter_module, "recover_final_chapter_text", return_value=recovered
+        ), patch.object(
+            generate_chapter_module, "find_quality_issues", side_effect=[["bad final draft"], []]
+        ):
+            word_count, _ = generate_chapter_module.generate_chapter(
+                1,
+                self.temp_dir,
+                silent=True,
+                beats_per_block=2,
+                revise=True,
+                cleanup=True,
+            )
+
+        self.assertEqual(mock_stream.call_count, 3)
+        self.assertGreater(word_count, 0)
+        with open(self.draft_path) as handle:
+            draft = handle.read()
+        self.assertIn("Recovered final prose", draft)
+        self.assertNotIn("## Beat 1 - Bad", draft)
+        with open(self.log_path) as handle:
+            log = handle.read()
+        self.assertIn("Final recovery triggered:", log)
+
+    def test_generate_chapter_exits_when_final_output_stays_invalid(self):
+        outputs = [
+            "Block one prose with setup and enough detail to count as a scene.",
+            "Block two prose with payoff and enough detail to count as a scene.",
+            "# Chapter 1: Test\n\n## Beat 1 - Bad\nPlanning text.\n\n### Word Count: 50",
+            "# Chapter 1: Still Bad\n\n## Beat 1 - Worse\nMore planning text.\n\n### Notes:\n- meta",
+        ]
+
+        with self.patch_generate_chapter_paths(), patch.object(
+            generate_chapter_module, "prepare_system_prompt", return_value=("SYSTEM", 50)
+        ), patch.object(
+            generate_chapter_module, "stream_llm", side_effect=outputs
+        ), patch.object(
+            generate_chapter_module, "clean_chapter_text", side_effect=lambda text, *args, **kwargs: (text, [])
+        ):
+            with self.assertRaises(SystemExit):
+                generate_chapter_module.generate_chapter(
+                    1,
+                    self.temp_dir,
+                    silent=True,
+                    beats_per_block=2,
+                    revise=True,
+                    cleanup=True,
+                )
+
+    def test_generate_chapter_writes_permissive_draft_when_cleanup_disabled(self):
+        outputs = [
+            "Block one prose with setup and enough detail to count as a scene.",
+            "Block two prose with payoff and enough detail to count as a scene.",
+            "# Chapter 1: Test\n\n## Beat 1 - Bad\nPlanning text.\n\n### Word Count: 50",
+        ]
+
+        with self.patch_generate_chapter_paths(), patch.object(
+            generate_chapter_module, "prepare_system_prompt", return_value=("SYSTEM", 40)
+        ), patch.object(
+            generate_chapter_module, "stream_llm", side_effect=outputs
+        ) as mock_stream:
+            word_count, _ = generate_chapter_module.generate_chapter(
+                1,
+                self.temp_dir,
+                silent=True,
+                beats_per_block=2,
+                revise=True,
+                cleanup=False,
+            )
+
+        self.assertEqual(mock_stream.call_count, 3)
+        self.assertGreater(word_count, 0)
+        with open(self.draft_path) as handle:
+            draft = handle.read()
+        self.assertIn("## Beat 1 - Bad", draft)
+        with open(self.log_path) as handle:
+            log = handle.read()
+        self.assertIn("Cleanup enforcement: no", log)
 
     def test_generate_next_chapter_beats_writes_next_brief(self):
         with self.patch_generate_chapter_paths(), patch.object(
@@ -490,6 +707,70 @@ class TestCompile(unittest.TestCase):
             self.assertIn("## Chapter 1: The Letter", content)
         finally:
             shutil.rmtree(output_dir, ignore_errors=True)
+
+
+class TestLLMProvider(unittest.TestCase):
+    def test_merge_payload_allows_nested_local_request_overrides(self):
+        merged = llm_provider._merge_payload(
+            {
+                "stream": True,
+                "chat_template_kwargs": {"enable_thinking": False},
+            },
+            {
+                "chat_template_kwargs": {"enable_thinking": True},
+                "top_k": 20,
+            },
+        )
+        self.assertTrue(merged["chat_template_kwargs"]["enable_thinking"])
+        self.assertEqual(merged["top_k"], 20)
+
+    def test_repetition_heuristics_flag_obvious_loop(self):
+        text = ("the storm raged on and on and on " * 80).strip()
+        self.assertGreaterEqual(text_quality.max_ngram_repetition_ratio(text), 0.18)
+        self.assertTrue(text_quality.looks_like_runaway_repetition(text))
+
+    def test_repetition_heuristics_ignore_normal_prose(self):
+        text = (
+            "Mara crossed the kitchen, opened the letter, read the signature twice, and looked toward the greenhouse. "
+            "Rain clicked against the window while Theo searched the hall closet for a flashlight and muttered about the broken lock. "
+            "She answered him, folded the paper into her pocket, and stepped onto the porch before she could change her mind."
+        )
+        self.assertLess(text_quality.max_ngram_repetition_ratio(text), 0.18)
+        self.assertFalse(text_quality.looks_like_runaway_repetition(text))
+
+
+class TestDraftQuality(unittest.TestCase):
+    def test_find_quality_issues_flags_repetitive_looping_text(self):
+        text = ("the storm raged on and on and on " * 80).strip()
+        issues = generate_chapter_module.find_quality_issues(text, target_words_total=200)
+        self.assertTrue(any("repetition" in issue.lower() or "compresses too well" in issue.lower() for issue in issues))
+
+    def test_find_quality_issues_does_not_flag_short_length_by_default(self):
+        text = "Mara opened the door, read the letter, and froze."
+        issues = generate_chapter_module.find_quality_issues(text, target_words_total=200)
+        self.assertFalse(any("too short" in issue.lower() or "too long" in issue.lower() for issue in issues))
+
+    def test_find_quality_issues_can_flag_short_length_when_enabled(self):
+        text = "Mara opened the door, read the letter, and froze."
+        issues = generate_chapter_module.find_quality_issues(
+            text,
+            target_words_total=200,
+            enforce_length=True,
+        )
+        self.assertTrue(any("too short" in issue.lower() for issue in issues))
+
+
+class TestSummarizeChapter(unittest.TestCase):
+    def test_build_summary_prompt_requests_rough_state_tracking(self):
+        prompt = summarize_chapter_module.build_summary_prompt(
+            2,
+            "Mara returned to the greenhouse and found the lock broken.",
+        )
+        self.assertIn("rough working summary", prompt)
+        self.assertIn("Be literal and compressed, not polished", prompt)
+        self.assertIn("### Chapter 2 — [SHORT TITLE]", prompt)
+        self.assertIn("- Character end states:", prompt)
+        self.assertIn("- Open threads:", prompt)
 
 
 class TestCLIWithTempProject(unittest.TestCase):

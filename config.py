@@ -32,6 +32,10 @@ def get_word_count_target():
     cfg = get_config()
     return cfg.get("story", {}).get("word_count_target", 25000)
 
+def is_chapter_length_enforced():
+    cfg = get_config()
+    return bool(cfg.get("story", {}).get("enforce_chapter_length", False))
+
 def is_local_mode():
     """Check if we're using local llama.cpp server."""
     cfg = get_config()
@@ -46,3 +50,9 @@ def get_local_model():
     """Get the local model identifier."""
     cfg = get_config()
     return cfg.get("local_model", "local")
+
+def get_local_request_overrides():
+    """Get extra JSON fields to merge into local chat-completions payloads."""
+    cfg = get_config()
+    overrides = cfg.get("local_request_overrides", {})
+    return overrides if isinstance(overrides, dict) else {}

@@ -223,6 +223,10 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
 
             issues = analyze_beats_document(beats_content)
             if issues:
+                print(
+                    f"  Repairing Chapter {ch_num} brief because: "
+                    + "; ".join(issues[:3])
+                )
                 repair_prompt = (
                     f"Rewrite this chapter brief so it is clean and draftable for Chapter {ch_num}.\n\n"
                     f"ISSUES TO FIX:\n" + "\n".join(f"- {issue}" for issue in issues) + "\n\n"
