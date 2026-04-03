@@ -117,7 +117,7 @@ def main():
     log("Summarizing chapter (streaming):", args.quiet)
     if not args.quiet:
         print("-" * 40)
-    summary = stream_llm(user_prompt, model=get_model("summarize"), system=system_prompt, silent=args.quiet)
+    summary = stream_llm(user_prompt, model=get_model("summarize"), system=system_prompt, silent=args.quiet, max_words=200)
     if not args.quiet:
         print("-" * 40)
         print()
@@ -155,6 +155,7 @@ def main():
             model=get_model("beats"),
             system="You are a story architect.",
             silent=args.quiet,
+            max_words=500,
         )
         if not args.quiet:
             print("-" * 40)

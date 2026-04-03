@@ -28,6 +28,7 @@ from chapter_planning import (
 )
 from config import get_model
 from config import is_chapter_length_enforced
+from config import is_pacing_enabled
 from dual_llm import stream_llm
 from paths import (
     CHAPTERS_DIR,

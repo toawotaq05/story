@@ -7,9 +7,9 @@
         "summarize":   "openrouter/qwen/qwen3-235b-a22b"
     },
     "story": {
-        "default_chapters": 14,
-        "word_count_target": 45000,
-        "enforce_chapter_length": false
+        "default_chapters": 8,
+        "word_count_target": 35000,
+        "enforce_chapter_length": true
     },
     "local_mode": true,
     "local_endpoint": "http://localhost:8080",
