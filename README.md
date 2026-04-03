@@ -30,7 +30,53 @@ If you do nothing, the active project defaults to `workspace/default/`.
 2. `plan_chapters.py --beats` fills or refreshes the chapter outline and generates chapter briefs for every planned chapter.
 3. `generate_chapter.py N` writes one coherent chapter draft from the story bible, cumulative summary, and `chapter_N_beats.md`.
 4. `summarize_chapter.py N` records story state and generates the next chapter brief if needed.
-5. `compile.py` assembles drafted chapters into `book.md` and, when `pandoc` is available, `book.epub`.
+5. `compile.py` assembles drafted chapters into `<project>.md` and, when `pandoc` is available, `<project>.epub`.
+
+### Dynamic Chapter Pacing
+
+Not every chapter deserves the same word count. The pipeline supports weighted chapter lengths so the LLM naturally varies chapter size based on narrative importance.
+
+To enable it, add `"dynamic_pacing": true` to the `story` block in `config.json`:
+
+```json
+{
+  "story": {
+    "default_chapters": 14,
+    "word_count_target": 45000,
+    "enforce_chapter_length": false,
+    "dynamic_pacing": true
+  }
+}
+```
+
+When pacing is enabled, the pipeline looks for `pacing_weights.json` in the project directory. This file maps chapter numbers to relative weight factors:
+
+```json
+{
+  "chapter_weights": {
+    "1": 0.8,
+    "2": 1.0,
+    "3": 1.4,
+    "4": 0.75,
+    "5": 1.0,
+    "6": 0.85,
+    "7": 1.2,
+    "8": 1.3
+  }
+}
+```
+
+- Weight 1.0 = baseline chapter length
+- Weight 1.4 = 40% more words (climax, turning point, heavy action)
+- Weight 0.7 = 30% fewer words (transition, bridge, setup)
+
+The `pacing_weights.json` file can be generated automatically in three ways:
+
+1. `plan_chapters.py --pacing` analyzes your outline and generates weights (one LLM call after the outline exists)
+2. `generate_chapter.py --all` auto-generates weights on first run if they don't exist and pacing is enabled
+3. Manually create/edit the file with your own weight assignments
+
+When pacing is disabled (the default), chapters divide the total word budget evenly as before — zero behavior change.
 
 The `.md` files under `chapters/` still use the `chapter_N_beats.md` name, but they now act as chapter briefs, not rigid scene-by-scene expansion contracts.
 
