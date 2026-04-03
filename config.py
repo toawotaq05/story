@@ -56,3 +56,9 @@ def get_local_request_overrides():
     cfg = get_config()
     overrides = cfg.get("local_request_overrides", {})
     return overrides if isinstance(overrides, dict) else {}
+
+
+def is_pacing_enabled():
+    """Check if dynamic chapter pacing (weighted word counts) is enabled."""
+    cfg = get_config()
+    return cfg.get("story", {}).get("dynamic_pacing", False)

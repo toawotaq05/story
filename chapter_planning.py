@@ -2,7 +2,7 @@
 """Shared chapter planning helpers and prompt builders."""
 import re
 
-from config import get_default_chapters, get_word_count_target
+from config import get_default_chapters, get_word_count_target, is_pacing_enabled
 from story_utils import parse_beats, parse_outline_entries, split_story_bible_and_outline
 
 
@@ -27,6 +27,51 @@ def get_total_chapters(story_bible_text):
 def get_target_words_per_chapter(story_bible_text):
     total_chapters = max(get_total_chapters(story_bible_text), 1)
     return max(get_word_count_target() // total_chapters, 1)
+
+
+def _load_pacing_weights():
+    """Load pacing weights from the project's pacing_weights.json file.
+    
+    Returns a dict mapping chapter number -> weight factor, or None if not found.
+    A weight of 1.0 is flat, 1.4 means 40% more words, 0.7 means 30% fewer.
+    """
+    import json
+    import os
+    from paths import PROJECT_DIR
+    
+    pacing_path = os.path.join(PROJECT_DIR, "pacing_weights.json")
+    if not os.path.exists(pacing_path):
+        return None
+    
+    try:
+        with open(pacing_path) as f:
+            data = json.load(f)
+        weights = data.get("chapter_weights", {})
+        # Convert string keys to int
+        return {int(k): v for k, v in weights.items()}
+    except (json.JSONDecodeError, ValueError, KeyError):
+        return None
+
+
+def get_target_words_for_chapter(story_bible_text, chapter_number):
+    """Get a chapter-specific word target, optionally adjusted by pacing weights.
+    
+    When dynamic_pacing is enabled in config.json, looks up the chapter's weight
+    factor from pacing_weights.json and adjusts the word count accordingly.
+    Falls back to the flat division if weights aren't available.
+    """
+    flat_target = get_target_words_per_chapter(story_bible_text)
+    
+    if not is_pacing_enabled():
+        return flat_target
+    
+    weights = _load_pacing_weights()
+    if weights is None:
+        return flat_target
+    
+    chapter_number = int(chapter_number)
+    weight = weights.get(chapter_number, 1.0)
+    return max(int(flat_target * weight), 1)
 
 
 def build_outline_context(story_bible_text, chapter_number, window=2):
@@ -398,3 +443,56 @@ CLEANUP INSTRUCTIONS:
 
 Output ONLY the cleaned chapter text.
 """
+
+
+def build_pacing_prompt(story_bible_text, outline_section, num_chapters):
+    """Build a prompt asking the LLM to assign relative pacing weights to each chapter.
+
+    The LLM receives the full story bible and outline, then assigns a weight factor
+    to each chapter based on narrative importance, action density, emotional weight,
+    and expected content volume. Weights are normalized so the average remains 1.0,
+    meaning the total word budget is preserved.
+    """
+    return f"""You are a story editor analyzing the narrative pacing of a book project.
+
+Below is the complete story bible and chapter outline for a story.
+
+TASK
+Assign a relative pacing weight to each chapter from 1 to {num_chapters}.
+
+A pacing weight determines how many words that chapter should get:
+- Weight 1.0 = normal chapter length (baseline)
+- Weight 1.3-1.5 = important chapter that deserves more detail (climax, turning point,
+  heavy action, or complex emotional development)
+- Weight 0.6-0.8 = lighter or transitional chapter (setup, aftermath, quick plot bridge)
+
+GUIDELINES FOR ASSIGNING WEIGHTS
+- Climax chapter(s): 1.3-1.5 (the emotional or action peak of the story)
+- Resolution chapter: 1.2-1.4 (tying up plot threads, emotional closure)
+- Inciting incident / first plot point: 1.1-1.3 (needs room to establish turning point)
+- Midpoint chapter: 1.2-1.3 (major story turn, reversal, revelation)
+- Transition/bridge chapters: 0.7-0.85 (move characters between major events)
+- Setup/aftermath chapters: 0.7-0.9 (lower action density)
+- Standard chapters: 0.9-1.1 (normal narrative progression)
+
+IMPORTANT CONSTRAINTS
+- Aim for an average weight of about 1.0 across all chapters
+- The highest weight and lowest weight should differ by at least 0.5
+- At least 2-3 chapters should be noticeably above 1.1
+- At least 2-3 chapters should be noticeably below 0.9
+- Do NOT give every chapter the same weight
+- Weights must be between 0.5 and 1.6
+
+STORY BIBLE:
+{story_bible_text}
+
+CHAPTER OUTLINE:
+{outline_section}
+
+OUTPUT FORMAT
+Output ONLY a valid JSON object with this exact structure. No preamble, no explanation:
+
+{{"chapter_weights": {{"1": 1.1, "2": 0.8, "3": 1.4, "4": 0.9, ...}}}}
+"""
+
+

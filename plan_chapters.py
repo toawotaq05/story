@@ -14,7 +14,7 @@ import sys
 import os
 import argparse
 
-from chapter_planning import build_chapter_beats_prompt
+from chapter_planning import build_chapter_beats_prompt, build_pacing_prompt
 from dual_llm import stream_llm
 from config import get_model, get_default_chapters
 from paths import (
@@ -48,6 +48,8 @@ def main():
                         help="Regenerate outline only, keep existing chapter briefs")
     parser.add_argument("--regen-beats", action="store_true",
                         help="Regenerate all chapter briefs from existing outline")
+    parser.add_argument("--pacing", action="store_true",
+                        help="Analyze story structure and generate chapter pacing weights")
     args = parser.parse_args()
 
     story_bible_path = STORY_BIBLE_PATH
@@ -259,17 +261,75 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
         print()
         print(f"✓ All chapter briefs generated")
         print()
-        print("Ready to write! Run:")
-        print("  python3 generate_chapter.py 1")
+
+        # --- Optionally generate pacing weights ---
+    if args.pacing:
+        print("=== Generating Pacing Weights ===")
+        print()
+
+        with open(story_bible_path) as f:
+            full_text = f.read()
+        story_bible_core, outline_section = split_story_bible_and_outline(full_text)
+        if not outline_section:
+            print("ERROR: Cannot generate pacing without an outline.")
+            sys.exit(1)
+
+        pacing_prompt = build_pacing_prompt(
+            story_bible_core, outline_section, len(parse_outline_entries(outline_section))
+        )
+
+        print("Analyzing story structure...")
+        pacing_output = stream_llm(pacing_prompt, model=get_model("outline"))
+        print(pacing_output)
+        print()
+
+        # Parse and save weights
+        try:
+            import json
+            import re
+            try:
+                pacing_data = json.loads(pacing_output)
+            except json.JSONDecodeError:
+                json_match = re.search(r"\{[\s\S]*\}", pacing_output)
+                if json_match:
+                    pacing_data = json.loads(json_match.group(0))
+                else:
+                    raise ValueError("No JSON object found in output")
+
+            weights = pacing_data.get("chapter_weights", {})
+            if not weights:
+                raise ValueError("No 'chapter_weights' found")
+
+            # Convert keys to int for validation, but keep string keys for JSON
+            validated_weights = {}
+            for k, v in weights.items():
+                if 0.5 <= float(v) <= 1.6:
+                    validated_weights[str(k)] = float(v)
+
+            project_pacing_file = os.path.join(os.path.dirname(story_bible_path), "pacing_weights.json")
+            with open(project_pacing_file, "w") as f:
+                json.dump({"chapter_weights": validated_weights}, f, indent=2)
+            
+            print(f"✓ Pacing weights saved to {project_pacing_file}")
+        except Exception as e:
+            print(f"ERROR: Could not parse pacing weights: {e}")
+            print("Pacing generation failed.")
 
     else:
         print("Chapter outline generated.")
+
         print()
+
         print(f"To review the outline, open: {story_bible_path}")
+
         print()
+
         print("Next steps:")
+
         print("  python3 plan_chapters.py --beats          # generate all chapter briefs")
+
         print("  python3 plan_chapters.py --beats --regen-beats  # regenerate all chapter briefs")
+
 
 if __name__ == "__main__":
     main()

@@ -19,8 +19,10 @@ from chapter_planning import (
     build_chapter_beats_prompt,
     build_chapter_cleanup_prompt,
     build_chapter_revision_prompt,
+    build_pacing_prompt,
     build_scene_block_prompt,
     find_chapter_entry,
+    get_target_words_for_chapter,
     get_target_words_per_chapter,
     get_total_chapters,
 )
@@ -45,6 +47,7 @@ from story_utils import (
     has_summary_for_chapter,
     is_valid_beats_document,
     parse_beats,
+    split_story_bible_and_outline,
 )
 from text_quality import compression_ratio, max_ngram_repetition_ratio
 
@@ -73,8 +76,12 @@ def parse_story_bible(content):
     return pov, tense
 
 
-def prepare_system_prompt(system_prompt, story_bible_text):
-    target_words_total = get_target_words_per_chapter(story_bible_text)
+def prepare_system_prompt(system_prompt, story_bible_text, chapter=None):
+    target_words_total = (
+        get_target_words_for_chapter(story_bible_text, chapter)
+        if chapter is not None
+        else get_target_words_per_chapter(story_bible_text)
+    )
     pov, tense = parse_story_bible(story_bible_text)
 
     if tense and tense.lower() == "past":
@@ -336,7 +343,7 @@ def generate_chapter(
         print(f"ERROR: Could not parse chapter brief for chapter {chapter}: {chapter_brief}")
         sys.exit(1)
 
-    prepared_system_prompt, target_words_total = prepare_system_prompt(system_prompt, story_bible_text)
+    prepared_system_prompt, target_words_total = prepare_system_prompt(system_prompt, story_bible_text, chapter=chapter)
     if enforce_length is None:
         enforce_length = is_chapter_length_enforced()
     chapter_entry = find_chapter_entry(story_bible_text, chapter)
@@ -345,11 +352,16 @@ def generate_chapter(
     blocks = group_beats_into_blocks(beats, beats_per_block=beats_per_block)
 
     if not silent:
+        flat_target = get_target_words_per_chapter(story_bible_text)
+        pacing_note = ""
+        if target_words_total != flat_target:
+            pct = int((target_words_total / flat_target) * 100)
+            pacing_note = f" (pacing: {pct}% of baseline)"
         print(f"\n{'=' * 70}")
         print(f"  GENERATING CHAPTER {chapter} — {chapter_title}")
         print(f"{'=' * 70}")
-        print("Method: staged scene-block drafting")
-        print(f"Target: ~{target_words_total:,} words")
+        print(f"Method: staged scene-block drafting")
+        print(f"Target: ~{target_words_total:,} words{pacing_note}")
         print(f"Blocks: {len(blocks)} (up to {beats_per_block} beats each)")
         print(f"{'=' * 70}\n")
 
@@ -659,6 +671,38 @@ def generate_all_sequential(
         story_bible_text = f.read()
     total_chapters = get_total_chapters(story_bible_text)
     min_chapter, max_chapter = min(chapter_nums), max(chapter_nums)
+
+    # --- Auto-generate pacing weights if enabled and missing ---
+    pacing_file = os.path.join(os.path.dirname(STORY_BIBLE_PATH), "pacing_weights.json")
+    if is_pacing_enabled() and not os.path.exists(pacing_file) and total_chapters >= 2:
+        from chapter_planning import parse_outline_entries
+
+        _, outline_section = split_story_bible_and_outline(story_bible_text)
+        if outline_section and parse_outline_entries(outline_section):
+            print("=== Auto-Generating Pacing Weights ===")
+            pacing_prompt = build_pacing_prompt(story_bible_text, outline_section, total_chapters)
+            pacing_output = stream_llm(pacing_prompt, model=get_model("outline"))
+            try:
+                try:
+                    pacing_data = json.loads(pacing_output)
+                except json.JSONDecodeError:
+                    json_match = re.search(r"\{[\s\S]*\}", pacing_output)
+                    if json_match:
+                        pacing_data = json.loads(json_match.group(0))
+                    else:
+                        raise ValueError("No JSON found")
+
+                weights = pacing_data.get("chapter_weights", {})
+                if weights:
+                    validated = {str(k): float(v) for k, v in weights.items()}
+                    with open(pacing_file, "w") as f:
+                        json.dump({"chapter_weights": validated}, f, indent=2)
+                    print(f"  Pacing weights saved ({len(validated)} chapters)")
+                else:
+                    print("  Pacing: no weights in output, skipping")
+            except Exception as e:
+                print(f"  Pacing generation failed: {e}")
+            print()
 
     print(f"\n{'=' * 70}")
     print("  SEQUENTIAL CHAPTER GENERATION")
