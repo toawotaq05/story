@@ -389,10 +389,10 @@ class TempWorkspaceCase(unittest.TestCase):
         self.summary_path = os.path.join(self.temp_dir, "cumulative_summary.md")
         self.system_prompt_path = os.path.join(self.temp_dir, "system_prompt.txt")
         self.beats_template_path = os.path.join(self.temp_dir, "chapter_beats_TEMPLATE.md")
-        self.draft_path = os.path.join(self.chapters_dir, "chapter_1_draft.txt")
-        self.log_path = os.path.join(self.chapters_dir, "chapter_1_generation_log.md")
-        self.chapter_1_brief_path = os.path.join(self.chapters_dir, "chapter_1_beats.md")
-        self.chapter_2_brief_path = os.path.join(self.chapters_dir, "chapter_2_beats.md")
+        self.draft_path = os.path.join(self.chapters_dir, "chapter_001_draft.txt")
+        self.log_path = os.path.join(self.chapters_dir, "chapter_001_generation_log.md")
+        self.chapter_1_brief_path = os.path.join(self.chapters_dir, "chapter_001_beats.md")
+        self.chapter_2_brief_path = os.path.join(self.chapters_dir, "chapter_002_beats.md")
 
         with open(self.story_bible_path, "w") as handle:
             handle.write(SAMPLE_STORY_BIBLE)
@@ -419,10 +419,10 @@ class TempWorkspaceCase(unittest.TestCase):
             SYSTEM_PROMPT_PATH=self.system_prompt_path,
             CHAPTER_BEATS_TEMPLATE_PATH=self.beats_template_path,
             ensure_runtime_dirs=lambda: None,
-            chapter_beats_path=lambda chapter: os.path.join(self.chapters_dir, f"chapter_{chapter}_beats.md"),
-            chapter_draft_path=lambda chapter: os.path.join(self.chapters_dir, f"chapter_{chapter}_draft.txt"),
+            chapter_beats_path=lambda chapter: os.path.join(self.chapters_dir, f"chapter_{chapter:03d}_beats.md"),
+            chapter_draft_path=lambda chapter: os.path.join(self.chapters_dir, f"chapter_{chapter:03d}_draft.txt"),
             chapter_generation_log_path=lambda chapter: os.path.join(
-                self.chapters_dir, f"chapter_{chapter}_generation_log.md"
+                self.chapters_dir, f"chapter_{chapter:03d}_generation_log.md"
             ),
         )
 
@@ -686,9 +686,9 @@ class TestCompile(unittest.TestCase):
         os.makedirs(self.chapters_dir, exist_ok=True)
         with open(os.path.join(self.project_dir, "story_bible.md"), "w") as handle:
             handle.write(SAMPLE_STORY_BIBLE)
-        with open(os.path.join(self.chapters_dir, "chapter_1_draft.txt"), "w") as handle:
+        with open(os.path.join(self.chapters_dir, "chapter_001_draft.txt"), "w") as handle:
             handle.write("Chapter one prose.")
-        with open(os.path.join(self.chapters_dir, "chapter_2_draft.txt"), "w") as handle:
+        with open(os.path.join(self.chapters_dir, "chapter_002_draft.txt"), "w") as handle:
             handle.write("Chapter two prose.")
 
     def tearDown(self):
@@ -699,7 +699,8 @@ class TestCompile(unittest.TestCase):
         try:
             with patch.object(compile_module, "write_epub", return_value=(False, "pandoc not found")):
                 compile_module.compile_book(project_dir=self.project_dir, output_path=output_dir, dry_run=False)
-            md_path = os.path.join(output_dir, "book.md")
+            project_name = os.path.basename(os.path.normpath(self.project_dir))
+            md_path = os.path.join(output_dir, project_name + ".md")
             self.assertTrue(os.path.exists(md_path))
             with open(md_path) as handle:
                 content = handle.read()

@@ -717,9 +717,9 @@ def generate_all_sequential(
         if chapter < total_chapters:
             next_beats_path = chapter_beats_path(chapter + 1)
             if os.path.exists(next_beats_path):
-                print(f"  ✓ chapter_{chapter + 1}_beats.md already exists")
+                print(f"  ✓ chapter_{chapter + 1:03d}_beats.md already exists")
             else:
-                print(f"  → Generating chapter_{chapter + 1}_beats.md...")
+                print(f"  → Generating chapter_{chapter + 1:03d}_beats.md...")
                 created = generate_next_chapter_beats(chapter)
                 if created:
                     print(f"  ✓ {os.path.basename(created)} written")

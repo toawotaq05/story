@@ -87,22 +87,22 @@ def raw_output_path(filename):
 
 def chapter_beats_path(chapter):
     ensure_runtime_dirs()
-    return os.path.join(CHAPTERS_DIR, f"chapter_{chapter}_beats.md")
+    return os.path.join(CHAPTERS_DIR, f"chapter_{int(chapter):03d}_beats.md")
 
 
 def chapter_draft_path(chapter):
     ensure_runtime_dirs()
-    return os.path.join(CHAPTERS_DIR, f"chapter_{chapter}_draft.txt")
+    return os.path.join(CHAPTERS_DIR, f"chapter_{int(chapter):03d}_draft.txt")
 
 
 def chapter_polished_path(chapter, beat_num):
     ensure_runtime_dirs()
-    return os.path.join(CHAPTERS_DIR, f"chapter_{chapter}_beat{beat_num}_polished.txt")
+    return os.path.join(CHAPTERS_DIR, f"chapter_{int(chapter):03d}_beat{beat_num}_polished.txt")
 
 
 def chapter_generation_log_path(chapter):
     ensure_runtime_dirs()
-    return os.path.join(CHAPTERS_DIR, f"chapter_{chapter}_generation_log.md")
+    return os.path.join(CHAPTERS_DIR, f"chapter_{int(chapter):03d}_generation_log.md")
 
 
 ensure_runtime_dirs()

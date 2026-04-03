@@ -259,7 +259,7 @@ Do not include any preamble, commentary, or explanation — output only the comp
 
     with open(chapter_beats_path(1), "w") as f:
         f.write(chapter_beats_content)
-    print("✓ chapters/chapter_1_beats.md written")
+    print("✓ chapters/chapter_001_beats.md written")
 
     print()
     print("=== Done ===")

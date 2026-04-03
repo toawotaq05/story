@@ -248,13 +248,13 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
             if issues:
                 print(f"  ⚠ WARNING: Generated beats for Chapter {ch_num} still look wrong")
                 print(f"  ⚠ Issues: {'; '.join(issues[:3])}")
-                print(f"  ⚠ NOT writing chapter_{ch_num}_beats.md — run with --regen-beats to retry")
+                print(f"  ⚠ NOT writing chapter_{ch_num:03d}_beats.md — run with --regen-beats to retry")
                 print(f"  ⚠ If this persists, check if local LLM context window is too small")
                 continue
 
             with open(beats_file, "w") as f:
                 f.write(beats_content)
-            print(f"  ✓ chapter_{ch_num}_beats.md written")
+            print(f"  ✓ chapter_{ch_num:03d}_beats.md written")
 
         print()
         print(f"✓ All chapter briefs generated")
