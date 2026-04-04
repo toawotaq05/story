@@ -16,8 +16,24 @@ import re
 import shutil
 import subprocess
 
-from paths import BOOK_OUTPUT_PATH, CONFIG_PATH, PROJECT_DIR
-from story_utils import count_words, extract_story_title, parse_outline_entries, split_story_bible_and_outline
+from paths import CONFIG_PATH, ROOT_DIR, get_project_dir
+from story_utils import (
+    count_words,
+    extract_story_title,
+    parse_outline_entries,
+    sanitize_chapter_draft_document,
+    split_story_bible_and_outline,
+)
+
+
+LEGACY_DRAFT_METADATA_RE = re.compile(
+    r"\A# Chapter \d+ Draft\n"
+    r"Generated: .+\n"
+    r"Method: .+\n"
+    r"Target: .+\n"
+    r"Actual: .+\n+---\n+",
+    re.MULTILINE,
+)
 
 
 def get_word_count_annotation(word_count, target):
@@ -29,7 +45,7 @@ def get_word_count_annotation(word_count, target):
 
 
 def resolve_project_dir(project_dir=None):
-    return os.path.abspath(project_dir or PROJECT_DIR)
+    return os.path.abspath(project_dir or get_project_dir())
 
 
 def resolve_output_paths(project_dir, output_path=None):
@@ -47,6 +63,15 @@ def resolve_output_paths(project_dir, output_path=None):
     base, _ = os.path.splitext(md_path)
     epub_path = base + ".epub"
     return md_path, epub_path
+
+
+COMPILED_EPUBS_DIR = os.path.join(ROOT_DIR, "workspace", "compiled_epubs")
+
+
+def extract_draft_prose(draft_text):
+    """Return prose content, stripping legacy generation metadata if present."""
+    cleaned = sanitize_chapter_draft_document(draft_text)
+    return LEGACY_DRAFT_METADATA_RE.sub("", cleaned, count=1).strip()
 
 
 def build_compiled_markdown(project_dir):
@@ -79,7 +104,7 @@ def build_compiled_markdown(project_dir):
             continue
         chapter_num = int(match.group(1))
         with open(draft_path) as handle:
-            draft_text = handle.read().strip()
+            draft_text = extract_draft_prose(handle.read())
 
         chapter_title = None
         for number, current_title in chapter_order:
@@ -115,6 +140,13 @@ def write_epub(md_path, epub_path):
     return True, None
 
 
+def copy_epub_to_directory(epub_path, copy_dir):
+    os.makedirs(copy_dir, exist_ok=True)
+    copied_path = os.path.join(copy_dir, os.path.basename(epub_path))
+    shutil.copy2(epub_path, copied_path)
+    return copied_path
+
+
 def compile_book(project_dir=None, output_path=None, dry_run=False):
     project_dir = resolve_project_dir(project_dir)
     md_path, epub_path = resolve_output_paths(project_dir, output_path)
@@ -124,6 +156,8 @@ def compile_book(project_dir=None, output_path=None, dry_run=False):
         print(compiled_markdown)
         print(f"\n[dry-run] Would write {count_words(compiled_markdown):,} words to {md_path}")
         print(f"[dry-run] Would also try to write EPUB to {epub_path}")
+        copied_path = os.path.join(COMPILED_EPUBS_DIR, os.path.basename(epub_path))
+        print(f"[dry-run] Would also copy EPUB to {copied_path}")
         return
 
     os.makedirs(os.path.dirname(md_path), exist_ok=True)
@@ -136,6 +170,9 @@ def compile_book(project_dir=None, output_path=None, dry_run=False):
     wrote_epub, message = write_epub(md_path, epub_path)
     if wrote_epub:
         print(f"Wrote EPUB -> {epub_path}")
+        if os.path.exists(epub_path):
+            copied_path = copy_epub_to_directory(epub_path, COMPILED_EPUBS_DIR)
+            print(f"Copied EPUB -> {copied_path}")
     elif message:
         print(message)
 
@@ -143,7 +180,7 @@ def compile_book(project_dir=None, output_path=None, dry_run=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Assemble chapter drafts into a single .md and optional .epub book")
     parser.add_argument("--output", help="Output .md path or directory (default: project_dir/book.md)")
-    parser.add_argument("--project-dir", help=f"Project directory to compile (default: {PROJECT_DIR})")
+    parser.add_argument("--project-dir", help=f"Project directory to compile (default: {get_project_dir()})")
     parser.add_argument("--dry-run", action="store_true", help="Print to stdout instead of writing files")
     args = parser.parse_args()
     try:

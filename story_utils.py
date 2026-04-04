@@ -8,6 +8,9 @@ OUTLINE_HEADING_RE = re.compile(r"(?mi)^#\s+Chapter Outline\b")
 OUTLINE_START_RE = re.compile(r"(?m)^\s*1\.\s+\*\*.+?\*\*")
 COMPLETED_CHAPTERS_RE = re.compile(r"(?mi)(-?\s*\*?\*?Completed Chapters:?\*?\*?\s*)(\d+)")
 SUMMARY_HEADER_RE = re.compile(r"(?mi)^###\s+Chapter\s+(\d+)\s*[—-]\s*(.+?)\s*$")
+SUMMARY_BLOCK_RE = re.compile(r"(?ms)^###\s+Chapter\s+(\d+)\s*[—-]\s*(.+?)\s*$.*?(?=^###\s+Chapter\s+\d+\b|\Z)")
+TOTAL_CHAPTERS_RE = re.compile(r"(?mi)^-\s+Total chapters:\s*(\d+)\s*$")
+TARGET_WORD_COUNT_RE = re.compile(r"(?mi)^-\s+Target word count:\s*([\d,]+)\s*$")
 OUTLINE_LINE_RE = re.compile(r"^\s*(\d+)\.\s+\*\*(.+?)\*\*\s*(.*)$")
 CHAPTER_LABEL_RE = re.compile(r"(?i)^chapter\s+(\d+)\s*[-—–:]\s*(.+)$")
 ENDS_SPLIT_RE = re.compile(r"\s*(?:→|->|>)\s*ends?:\s*", re.IGNORECASE)
@@ -233,6 +236,207 @@ def parse_completed_chapters(summary_content):
     return int(match.group(2)) if match else 0
 
 
+def _strip_reasoning_artifacts(text):
+    if not text:
+        return text
+
+    patterns = [
+        r"<think>.*?</think>",
+        r"<thought>.*?</thought>",
+        r"\[thinking\].*?\[/thinking\]",
+        r"\[thinking\].*?\[end thinking\]",
+        r"(?ms)^\s*Thinking Process:\s*.*?(?=^#\s+Chapter\b|^###\s+(?:Chapter|Beat)\s+\d+\b|\Z)",
+    ]
+
+    for pattern in patterns:
+        text = re.sub(pattern, "", text, flags=re.DOTALL | re.IGNORECASE)
+
+    return text
+
+
+def sanitize_story_bible_document(text):
+    return _strip_reasoning_artifacts(text or "").strip()
+
+
+def sanitize_outline_document(text):
+    return _strip_reasoning_artifacts(text or "").strip()
+
+
+def sanitize_beats_document(text, chapter_number=None, chapter_title=None):
+    return salvage_beats_document(
+        text,
+        chapter_number=chapter_number,
+        chapter_title=chapter_title,
+    )
+
+
+def sanitize_summary_document(text, chapter_number=None, fallback_title=None):
+    return normalize_summary_block(
+        text,
+        chapter_number=chapter_number,
+        fallback_title=fallback_title,
+    )
+
+
+def sanitize_cumulative_summary_document(text):
+    return normalize_cumulative_summary(text)
+
+
+def sanitize_chapter_draft_document(text):
+    return _strip_reasoning_artifacts(text or "").strip()
+
+
+def finalize_beats_document(
+    content,
+    chapter_number,
+    chapter_title,
+    current_chapter_target_prompt,
+    llm_call=None,
+    repair_requirements=None,
+):
+    """Sanitize, validate, and optionally repair a chapter brief."""
+    chapter_number = int(chapter_number)
+    repair_requirements = repair_requirements or [
+        "Keep the same planned chapter events and ending direction",
+        "Output only the chapter brief document",
+        "Start with a '# Chapter N — Title' heading",
+        "Use 4-6 concrete '### Beat N: Label' sections",
+        "Remove placeholders, duplicated beats, vague filler, and leaked thinking/reasoning text",
+    ]
+
+    content = sanitize_beats_document(
+        content,
+        chapter_number=chapter_number,
+        chapter_title=chapter_title,
+    )
+    issues = analyze_beats_document(content)
+    initial_issues = list(issues)
+    repaired = False
+    strict_retry = False
+
+    if issues and llm_call is not None:
+        repair_prompt = (
+            f"Rewrite this chapter brief so it is clean and draftable for Chapter {chapter_number}.\n\n"
+            f"ISSUES TO FIX:\n" + "\n".join(f"- {issue}" for issue in issues) + "\n\n"
+            "REQUIREMENTS:\n" + "\n".join(f"- {item}" for item in repair_requirements) + "\n\n"
+            f"CURRENT BRIEF:\n{content}"
+        )
+        content = sanitize_beats_document(
+            llm_call(
+                repair_prompt,
+                "You repair malformed chapter briefs into clean drafting plans.",
+            ),
+            chapter_number=chapter_number,
+            chapter_title=chapter_title,
+        )
+        issues = analyze_beats_document(content)
+        repaired = True
+
+    if issues and len(parse_beats(content)) == 0 and llm_call is not None:
+        strict_prompt = (
+            f"Write ONLY a valid chapter brief for Chapter {chapter_number}.\n\n"
+            f"CURRENT CHAPTER TARGET:\n{current_chapter_target_prompt}\n\n"
+            "OUTPUT CONTRACT:\n"
+            f"- First line must be: # Chapter {chapter_number} — {chapter_title}\n"
+            "- Include at least 4 sections exactly like: ### Beat N: [Label]\n"
+            "- Each beat must contain concrete, draftable scene detail\n"
+            "- No commentary, analysis, or reasoning text\n"
+        )
+        content = sanitize_beats_document(
+            llm_call(
+                strict_prompt,
+                "You output only clean chapter brief markdown.",
+            ),
+            chapter_number=chapter_number,
+            chapter_title=chapter_title,
+        )
+        issues = analyze_beats_document(content)
+        strict_retry = True
+
+    return {
+        "content": content,
+        "issues": issues,
+        "initial_issues": initial_issues,
+        "repaired": repaired,
+        "strict_retry": strict_retry,
+    }
+
+
+def normalize_summary_block(summary_block, chapter_number=None, fallback_title=None):
+    text = _strip_reasoning_artifacts(summary_block or "").strip()
+    if not text:
+        return ""
+
+    header_match = SUMMARY_HEADER_RE.search(text)
+    if header_match:
+        return text[header_match.start():].strip()
+
+    if chapter_number is None:
+        return text
+
+    title = (fallback_title or f"Chapter {int(chapter_number)}").strip()
+    if re.search(r"(?mi)^-\s+Sequence:\s*$", text):
+        return f"### Chapter {int(chapter_number)} — {title}\n{text}".strip()
+    return text
+
+
+def normalize_cumulative_summary(summary_content):
+    original = summary_content or ""
+    cleaned = _strip_reasoning_artifacts(original)
+
+    total_match = TOTAL_CHAPTERS_RE.search(cleaned) or TOTAL_CHAPTERS_RE.search(original)
+    target_match = TARGET_WORD_COUNT_RE.search(cleaned) or TARGET_WORD_COUNT_RE.search(original)
+    total_chapters = int(total_match.group(1)) if total_match else 0
+    target_word_count = int(target_match.group(1).replace(",", "")) if target_match else 0
+    completed = parse_completed_chapters(cleaned or original)
+
+    if total_chapters and target_word_count:
+        normalized = build_initial_cumulative_summary(total_chapters, target_word_count)
+    else:
+        normalized = cleaned.strip() + ("\n" if cleaned.strip() else "")
+
+    if completed:
+        normalized = set_completed_chapters(normalized, completed)
+
+    blocks_by_number = {}
+    order = []
+    for match in SUMMARY_BLOCK_RE.finditer(cleaned):
+        number = int(match.group(1))
+        block = normalize_summary_block(match.group(0), chapter_number=number, fallback_title=match.group(2))
+        if not block:
+            continue
+        if number not in blocks_by_number:
+            order.append(number)
+        blocks_by_number[number] = block
+
+    if blocks_by_number:
+        normalized = normalized.rstrip() + "\n\n" + "\n\n".join(
+            blocks_by_number[number].strip() for number in order
+        )
+
+    return normalized.rstrip() + "\n"
+
+
+def salvage_beats_document(beats_content, chapter_number=None, chapter_title=None):
+    text = _strip_reasoning_artifacts(beats_content or "").strip()
+    if not text:
+        return ""
+
+    chapter_heading_match = re.search(r"(?m)^#\s*Chapter\b", text)
+    if chapter_heading_match:
+        return text[chapter_heading_match.start():].strip()
+
+    beats = parse_beats(text)
+    if len(beats) < 2 or chapter_number is None:
+        return text
+
+    title = (chapter_title or f"Chapter {int(chapter_number)}").strip()
+    sections = "\n\n".join(beat_text.strip() for _, beat_text in beats if beat_text.strip())
+    if not sections:
+        return text
+    return f"# Chapter {int(chapter_number)} — {title}\n\n{sections}".strip()
+
+
 def set_completed_chapters(summary_content, chapter_number):
     if COMPLETED_CHAPTERS_RE.search(summary_content):
         return COMPLETED_CHAPTERS_RE.sub(rf"\g<1>{chapter_number}", summary_content, count=1)
@@ -252,6 +456,8 @@ def has_summary_for_chapter(summary_content, chapter_number):
 
 
 def upsert_chapter_summary(summary_content, chapter_number, summary_block):
+    summary_content = normalize_cumulative_summary(summary_content)
+    summary_block = normalize_summary_block(summary_block, chapter_number=chapter_number)
     pattern = re.compile(
         rf"(?ms)^###\s+Chapter\s+{int(chapter_number)}\b.*?(?=^###\s+Chapter\s+\d+\b|\Z)"
     )

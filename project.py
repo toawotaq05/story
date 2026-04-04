@@ -7,9 +7,9 @@ import sys
 from paths import (
     CURRENT_PROJECT_FILE,
     DEFAULT_PROJECTS_DIR,
-    PROJECT_DIR,
     ensure_runtime_dirs,
     get_current_project_name,
+    get_project_dir,
     set_current_project_name,
 )
 
@@ -92,7 +92,7 @@ def main():
         return
     if args.command == "path":
         ensure_runtime_dirs()
-        print(PROJECT_DIR)
+        print(get_project_dir())
         return
 
     parser.print_help()

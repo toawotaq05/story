@@ -49,6 +49,29 @@ def _strip_thinking_tags(text):
     return text
 
 
+def _strip_leading_reasoning_preamble(text):
+    """Remove leaked leading reasoning when the model never closed its think tag."""
+    if not text:
+        return text
+
+    stripped = text.lstrip()
+    if not stripped.startswith("<think"):
+        return text
+
+    close_match = re.search(r"</think\s*>", stripped, flags=re.IGNORECASE)
+    if close_match:
+        remainder = stripped[close_match.end():].lstrip()
+        return remainder
+
+    lines = stripped.splitlines()
+    for index, line in enumerate(lines):
+        candidate = line.strip()
+        if candidate.startswith(("# ", "## ", "### ", "{", "[")):
+            return "\n".join(lines[index:]).lstrip()
+
+    return re.sub(r"(?is)^<think\b[^>]*>", "", stripped, count=1).lstrip()
+
+
 def _new_loop_detector():
     return {"triggers": 0, "words_seen": 0, "next_check": 160}
 
@@ -149,7 +172,7 @@ def _stream_local(prompt, model=None, system="", silent=False, retries=3, backof
         "max_tokens": max_tokens,
         "stream": True,
     }
-    payload = _merge_payload(payload, get_local_request_overrides())
+    payload = _merge_payload(payload, get_local_request_overrides(model))
 
     for attempt in range(retries):
         if attempt > 0:
@@ -223,6 +246,7 @@ def _stream_local(prompt, model=None, system="", silent=False, retries=3, backof
             if not result.strip():
                 result = "".join(reasoning)
             result = _strip_thinking_tags(result)
+            result = _strip_leading_reasoning_preamble(result)
             return result
 
         except Exception as e:
@@ -300,4 +324,13 @@ def _stream_remote(prompt, model=None, system="", silent=False, retries=3, backo
     result = "".join(output)
     # Strip thinking tags to avoid clutter in saved outputs
     result = _strip_thinking_tags(result)
+    result = _strip_leading_reasoning_preamble(result)
+    # Remove leading lines of thinking/reasoning that leaked through (no closing tag)
+    result = result.lstrip()
+    if result.startswith(("Thinking", "Thought", "Let's", "Wait,")):
+        lines = result.splitlines()
+        for i, line in enumerate(lines):
+            if line.strip().startswith("# Chapter") or line.strip().startswith("##"):
+                result = "\n".join(lines[i:])
+                break
     return result

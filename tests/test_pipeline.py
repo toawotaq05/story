@@ -4,6 +4,7 @@ tests/test_pipeline.py — Deterministic tests for the story pipeline.
 Run: python3 tests/test_pipeline.py
 """
 import json
+import io
 import os
 import shutil
 import subprocess
@@ -18,6 +19,7 @@ import chapter_planning
 import build_story_bible
 import compile as compile_module
 import generate_chapter as generate_chapter_module
+import plan_chapters as plan_chapters_module
 import summarize_chapter as summarize_chapter_module
 import story_utils
 from dual_llm import llm_provider
@@ -79,6 +81,77 @@ SAMPLE_SUMMARY = """# Cumulative Story Summary
 - **Completed Chapters:** 0
 """
 
+REGRESSION_FIXTURES = {
+    "beats_with_reasoning_leak": {
+        "raw": """<think>
+Thinking Process:
+- inspect outline
+- draft beats
+
+# Chapter 2 — The Return
+
+### Beat 1: Arrival
+Mara returns home, studies the greenhouse door, and sees that the bolt is set from the inside.
+
+### Beat 2: Unease
+She circles the house, hears movement after midnight, and realizes fear is not distorting the sound.
+
+### Beat 3: Decision
+She chooses to investigate before dawn because waiting is making the house feel more dangerous.
+""",
+        "chapter_number": 2,
+        "chapter_title": "The Return",
+    },
+    "summary_and_cumulative_reasoning_leak": {
+        "summary_raw": """<think>
+Thinking Process:
+- inspect draft
+
+### Chapter 2 — The Return
+- Sequence:
+  - Mara returns home and finds the greenhouse bolted from the inside.
+- Plot facts established:
+  - Someone is already on the property.
+- Character end states:
+  - Mara: outside the greenhouse, tense, committed to investigating.
+- Open threads:
+  - Who is inside the greenhouse?
+""",
+        "cumulative_raw": """# Cumulative Story Summary
+
+## Overview
+
+- Total chapters: 3
+- Target word count: 9,000
+- **Completed Chapters:** 1
+
+Thinking Process:
+- inspect previous summary
+
+### Chapter 1 — The Letter
+- Sequence:
+  - Mara receives an unsigned letter and decides to return home.
+""",
+    },
+    "chapter_draft_with_reasoning_and_legacy_header": {
+        "draft_raw": """# Chapter 1 Draft
+Generated: 2026-04-04 12:00:00
+Method: staged scene-block drafting
+Target: 3,000 words
+Actual: 2,850 words
+
+---
+
+<think>
+Thinking Process:
+- continue scene
+</think>
+
+Mara crossed the greenhouse and lifted the ledger from the wet bench.
+""",
+    },
+}
+
 
 class TestConfig(unittest.TestCase):
     def test_default_model_is_set(self):
@@ -101,6 +174,66 @@ class TestConfig(unittest.TestCase):
         with patch("config._config_cache", {"models": {}, "story": {}}):
             from config import get_local_request_overrides
             self.assertEqual(get_local_request_overrides(), {})
+
+    def test_get_local_request_overrides_merges_defaults_presets_and_legacy_overrides(self):
+        with patch(
+            "config._config_cache",
+            {
+                "models": {
+                    "write": "openrouter/example/creative-model",
+                    "summarize": "openrouter/example/summary-model",
+                },
+                "story": {},
+                "local_request_defaults": {
+                    "temperature": 0.7,
+                    "top_p": 0.9,
+                    "chat_template_kwargs": {"enable_thinking": False},
+                },
+                "sampling_presets": {
+                    "creative_open": {
+                        "temperature": 1.0,
+                        "top_p": 1.0,
+                        "min_p": 0.05,
+                        "top_k": 0,
+                    },
+                    "summary_strict": {
+                        "temperature": 0.2,
+                        "top_p": 0.8,
+                    },
+                },
+                "task_presets": {
+                    "write": "creative_open",
+                    "summarize": "summary_strict",
+                },
+                "model_presets": {
+                    "openrouter/example/creative-model": "creative_open",
+                },
+                "local_task_request_overrides": {
+                    "write": {"top_n_sigma": 1.0},
+                },
+                "local_model_request_overrides": {
+                    "openrouter/example/creative-model": {"min_p": 0.08},
+                },
+                "local_request_overrides": {
+                    "chat_template_kwargs": {"enable_thinking": True},
+                },
+            },
+        ):
+            from config import get_local_request_overrides
+
+            write_overrides = get_local_request_overrides("write")
+            summarize_overrides = get_local_request_overrides("summarize")
+
+        self.assertEqual(write_overrides["temperature"], 1.0)
+        self.assertEqual(write_overrides["top_p"], 1.0)
+        self.assertEqual(write_overrides["top_k"], 0)
+        self.assertEqual(write_overrides["min_p"], 0.08)
+        self.assertEqual(write_overrides["top_n_sigma"], 1.0)
+        self.assertTrue(write_overrides["chat_template_kwargs"]["enable_thinking"])
+
+        self.assertEqual(summarize_overrides["temperature"], 0.2)
+        self.assertEqual(summarize_overrides["top_p"], 0.8)
+        self.assertTrue(summarize_overrides["chat_template_kwargs"]["enable_thinking"])
 
 
 class TestProjectStructure(unittest.TestCase):
@@ -201,6 +334,77 @@ Second movement.
         self.assertNotIn("Old summary text.", updated)
         self.assertIn("### Chapter 2 — Another", updated)
 
+    def test_normalize_summary_block_strips_leading_reasoning(self):
+        noisy = (
+            "<think>\nThinking Process:\n- inspect draft\n\n"
+            "### Chapter 2 — The Return\n"
+            "- Sequence:\n"
+            "  - Mara comes home.\n"
+        )
+        normalized = story_utils.normalize_summary_block(noisy, chapter_number=2)
+        self.assertTrue(normalized.startswith("### Chapter 2 — The Return"))
+        self.assertNotIn("Thinking Process", normalized)
+
+    def test_normalize_cumulative_summary_drops_interstitial_reasoning(self):
+        noisy = (
+            "# Cumulative Story Summary\n\n"
+            "## Overview\n\n"
+            "- Total chapters: 3\n"
+            "- Target word count: 9,000\n"
+            "- **Completed Chapters:** 2\n\n"
+            "<think>\nThinking Process:\n- inspect chapter 1\n\n"
+            "### Chapter 1 — The Letter\n"
+            "- Sequence:\n"
+            "  - Mara receives a letter.\n\n"
+            "Thinking Process:\n- inspect chapter 2\n\n"
+            "### Chapter 2 — The Return\n"
+            "- Sequence:\n"
+            "  - Mara goes home.\n"
+        )
+        normalized = story_utils.normalize_cumulative_summary(noisy)
+        self.assertIn("- **Completed Chapters:** 2", normalized)
+        self.assertIn("### Chapter 1 — The Letter", normalized)
+        self.assertIn("### Chapter 2 — The Return", normalized)
+        self.assertNotIn("Thinking Process", normalized)
+
+    def test_salvage_beats_document_rebuilds_missing_heading(self):
+        noisy = (
+            "Thinking Process:\n- plan beats\n\n"
+            "### Beat 1: Arrival\nMara enters the greenhouse before dawn and notices the broken lock and disturbed soil.\n\n"
+            "### Beat 2: Search\nShe checks the workbench and realizes the ledger is missing from the drawer.\n\n"
+            "### Beat 3: Choice\nShe decides to stay until sunrise and confront whoever returns.\n"
+        )
+        normalized = story_utils.salvage_beats_document(noisy, chapter_number=3, chapter_title="Glass Hours")
+        self.assertTrue(normalized.startswith("# Chapter 3 — Glass Hours"))
+        self.assertIn("### Beat 2: Search", normalized)
+
+    def test_sanitize_beats_document_removes_thinking_and_restores_heading(self):
+        noisy = (
+            "<think>\nThinking Process:\n- plan beats\n\n"
+            "### Beat 1: Arrival\nMara enters the greenhouse before dawn and notices the broken lock and disturbed soil.\n\n"
+            "### Beat 2: Search\nShe checks the workbench and realizes the ledger is missing from the drawer.\n\n"
+            "### Beat 3: Choice\nShe decides to stay until sunrise and confront whoever returns.\n"
+        )
+        cleaned = story_utils.sanitize_beats_document(
+            noisy,
+            chapter_number=3,
+            chapter_title="Glass Hours",
+        )
+        self.assertTrue(cleaned.startswith("# Chapter 3 — Glass Hours"))
+        self.assertNotIn("<think>", cleaned)
+        self.assertNotIn("Thinking Process", cleaned)
+
+    def test_sanitize_chapter_draft_document_removes_thinking_tags(self):
+        noisy = (
+            "<think>\nThinking Process:\n- continue scene\n</think>\n\n"
+            "Mara crossed the greenhouse and lifted the ledger from the wet bench."
+        )
+        cleaned = story_utils.sanitize_chapter_draft_document(noisy)
+        self.assertEqual(
+            cleaned,
+            "Mara crossed the greenhouse and lifted the ledger from the wet bench.",
+        )
+
     def test_analyze_beats_document_flags_placeholders_and_duplicates(self):
         brief = """# Chapter Brief — Test
 
@@ -235,6 +439,85 @@ class TestChapterPlanning(unittest.TestCase):
         self.assertIn("Chapter 2 should open from", prompt)
         self.assertIn("template here", prompt)
         self.assertIn("Mara receives an unsigned letter", prompt)
+
+    def test_plan_chapters_regen_beats_passes_full_story_bible_to_prompt_builder(self):
+        temp_project = tempfile.mkdtemp(prefix="plan_beats_")
+        self.addCleanup(lambda: shutil.rmtree(temp_project, ignore_errors=True))
+
+        story_bible_path = os.path.join(temp_project, "story_bible.md")
+        with open(story_bible_path, "w") as handle:
+            handle.write(SAMPLE_STORY_BIBLE)
+
+        prompt_story_bibles = []
+
+        def fake_build_chapter_beats_prompt(story_bible_text, chapter_number, cumulative_summary="", beats_template=""):
+            prompt_story_bibles.append(story_bible_text)
+            return f"prompt for chapter {chapter_number}"
+
+        with patch.dict(os.environ, {"BOOK_PROJECT_DIR": temp_project}, clear=False):
+            with patch.object(sys, "argv", ["plan_chapters.py", "--regen-beats"]):
+                with patch("plan_chapters.build_chapter_beats_prompt", side_effect=fake_build_chapter_beats_prompt):
+                    with patch("plan_chapters.stream_llm", return_value=SAMPLE_BRIEF):
+                        with patch(
+                            "plan_chapters.finalize_beats_document",
+                            return_value={
+                                "content": SAMPLE_BRIEF,
+                                "issues": [],
+                                "initial_issues": [],
+                                "repaired": False,
+                            },
+                        ):
+                            plan_chapters_module.main()
+
+        self.assertTrue(prompt_story_bibles)
+        self.assertTrue(all("# Chapter Outline" in text for text in prompt_story_bibles))
+
+    def test_plan_chapters_stops_after_first_invalid_brief(self):
+        temp_project = tempfile.mkdtemp(prefix="plan_beats_fail_")
+        self.addCleanup(lambda: shutil.rmtree(temp_project, ignore_errors=True))
+
+        story_bible_path = os.path.join(temp_project, "story_bible.md")
+        with open(story_bible_path, "w") as handle:
+            handle.write(SAMPLE_STORY_BIBLE)
+
+        llm_prompts = []
+        finalize_calls = []
+
+        def fake_stream_llm(user_prompt, model=None, system=None, **kwargs):
+            llm_prompts.append(user_prompt)
+            return SAMPLE_BRIEF
+
+        def fake_finalize(content, chapter_number, chapter_title, current_chapter_target_prompt, llm_call=None, repair_requirements=None):
+            finalize_calls.append(int(chapter_number))
+            if int(chapter_number) == 2:
+                return {
+                    "content": content,
+                    "issues": ["Beat 5 still contains placeholder-style brackets."],
+                    "initial_issues": ["Beat 5 still contains placeholder-style brackets."],
+                    "repaired": True,
+                    "strict_retry": False,
+                }
+            return {
+                "content": content,
+                "issues": [],
+                "initial_issues": [],
+                "repaired": False,
+                "strict_retry": False,
+            }
+
+        with patch.dict(os.environ, {"BOOK_PROJECT_DIR": temp_project}, clear=False):
+            with patch.object(sys, "argv", ["plan_chapters.py", "--regen-beats"]):
+                with patch("plan_chapters.stream_llm", side_effect=fake_stream_llm):
+                    with patch("plan_chapters.finalize_beats_document", side_effect=fake_finalize):
+                        with self.assertRaises(SystemExit) as exc:
+                            plan_chapters_module.main()
+
+        self.assertEqual(exc.exception.code, 1)
+        self.assertEqual(finalize_calls, [1, 2])
+        self.assertEqual(len(llm_prompts), 2)
+        self.assertTrue(os.path.exists(os.path.join(temp_project, "chapters", "chapter_001_beats.md")))
+        self.assertFalse(os.path.exists(os.path.join(temp_project, "chapters", "chapter_002_beats.md")))
+        self.assertFalse(os.path.exists(os.path.join(temp_project, "chapters", "chapter_003_beats.md")))
 
     def test_build_scene_block_prompt_includes_continuity(self):
         beats = story_utils.parse_beats(SAMPLE_BRIEF)
@@ -426,6 +709,16 @@ class TempWorkspaceCase(unittest.TestCase):
             ),
         )
 
+    def patch_summarize_chapter_paths(self):
+        return patch.multiple(
+            summarize_chapter_module,
+            STORY_BIBLE_PATH=self.story_bible_path,
+            CUMULATIVE_SUMMARY_PATH=self.summary_path,
+            CHAPTER_BEATS_TEMPLATE_PATH=self.beats_template_path,
+            chapter_beats_path=lambda chapter: os.path.join(self.chapters_dir, f"chapter_{chapter:03d}_beats.md"),
+            chapter_draft_path=lambda chapter: os.path.join(self.chapters_dir, f"chapter_{chapter:03d}_draft.txt"),
+        )
+
 
 class TestGenerateChapterFlow(TempWorkspaceCase):
     def test_prepare_system_prompt_fills_placeholders(self):
@@ -472,7 +765,8 @@ class TestGenerateChapterFlow(TempWorkspaceCase):
 
         with open(self.draft_path) as handle:
             draft = handle.read()
-        self.assertIn("Method: staged scene-block drafting", draft)
+        self.assertNotIn("Method: staged scene-block drafting", draft)
+        self.assertNotIn("Generated:", draft)
         self.assertIn("Revised final chapter prose", draft)
 
         with open(self.log_path) as handle:
@@ -678,6 +972,28 @@ class TestGenerateChapterFlow(TempWorkspaceCase):
             content = handle.read()
         self.assertIn("### Beat 3: Decision", content)
 
+    def test_generate_next_chapter_beats_retries_strictly_when_no_beats(self):
+        outputs = [
+            "This chapter should focus on tension and atmosphere.",
+            "Still bad output with no beat sections at all.",
+            (
+                "# Chapter 2 — The Return\n\n"
+                "### Beat 1: Arrival\nMara returns home after midnight, checks the greenhouse lock, and notices marks that suggest someone entered recently.\n\n"
+                "### Beat 2: Unease\nShe circles the house twice, hears movement in the dark, and realizes she can no longer dismiss her fear as imagination.\n\n"
+                "### Beat 3: Decision\nShe commits to investigating before dawn despite the risk because waiting would leave the threat in control.\n\n"
+                "### Beat 4: Handoff\nShe opens the greenhouse door and steps inside, ending the chapter at the threshold of direct confrontation.\n"
+            ),
+        ]
+        with self.patch_generate_chapter_paths(), patch.object(
+            generate_chapter_module, "stream_llm", side_effect=outputs
+        ):
+            created = generate_chapter_module.generate_next_chapter_beats(1)
+
+        self.assertEqual(created, self.chapter_2_brief_path)
+        with open(self.chapter_2_brief_path) as handle:
+            content = handle.read()
+        self.assertIn("### Beat 4: Handoff", content)
+
 
 class TestCompile(unittest.TestCase):
     def setUp(self):
@@ -706,6 +1022,62 @@ class TestCompile(unittest.TestCase):
                 content = handle.read()
             self.assertIn("# The Silent Garden", content)
             self.assertIn("## Chapter 1: The Letter", content)
+            self.assertNotIn("Generated:", content)
+            self.assertNotIn("Method: staged scene-block drafting", content)
+        finally:
+            shutil.rmtree(output_dir, ignore_errors=True)
+
+    def test_compile_book_strips_legacy_draft_metadata(self):
+        with open(os.path.join(self.chapters_dir, "chapter_001_draft.txt"), "w") as handle:
+            handle.write(
+                "# Chapter 1 Draft\n"
+                "Generated: 2026-04-04 12:00:00\n"
+                "Method: staged scene-block drafting\n"
+                "Target: 3,000 words\n"
+                "Actual: 2,850 words\n\n"
+                "---\n\n"
+                "Chapter one prose.\n"
+            )
+
+        compiled_markdown, chapter_count = compile_module.build_compiled_markdown(self.project_dir)
+
+        self.assertEqual(chapter_count, 2)
+        self.assertIn("Chapter one prose.", compiled_markdown)
+        self.assertNotIn("# Chapter 1 Draft", compiled_markdown)
+        self.assertNotIn("Generated:", compiled_markdown)
+        self.assertNotIn("Method: staged scene-block drafting", compiled_markdown)
+
+    def test_compile_book_copies_epub_to_repo_directory(self):
+        export_root = tempfile.mkdtemp()
+        output_dir = tempfile.mkdtemp()
+        try:
+            def fake_write_epub(md_path, epub_path):
+                with open(epub_path, "w") as handle:
+                    handle.write("fake epub")
+                return True, None
+
+            with patch.object(compile_module, "COMPILED_EPUBS_DIR", export_root), patch.object(
+                compile_module, "write_epub", side_effect=fake_write_epub
+            ):
+                compile_module.compile_book(project_dir=self.project_dir, output_path=output_dir, dry_run=False)
+
+            project_name = os.path.basename(os.path.normpath(self.project_dir))
+            copied_epub = os.path.join(export_root, project_name + ".epub")
+            self.assertTrue(os.path.exists(copied_epub))
+        finally:
+            shutil.rmtree(export_root, ignore_errors=True)
+            shutil.rmtree(output_dir, ignore_errors=True)
+
+    def test_compile_book_dry_run_reports_epub_copy_destination(self):
+        output_dir = tempfile.mkdtemp()
+        try:
+            stdout = io.StringIO()
+            with patch.object(compile_module, "COMPILED_EPUBS_DIR", "/tmp/shared_epubs"), patch("sys.stdout", stdout):
+                compile_module.compile_book(project_dir=self.project_dir, output_path=output_dir, dry_run=True)
+
+            output = stdout.getvalue()
+            self.assertIn("Would also copy EPUB to", output)
+            self.assertIn("/tmp/shared_epubs", output)
         finally:
             shutil.rmtree(output_dir, ignore_errors=True)
 
@@ -725,6 +1097,61 @@ class TestLLMProvider(unittest.TestCase):
         self.assertTrue(merged["chat_template_kwargs"]["enable_thinking"])
         self.assertEqual(merged["top_k"], 20)
 
+    def test_stream_local_applies_task_specific_request_overrides(self):
+        response_lines = iter(
+            [
+                b'data: {"choices":[{"delta":{"content":"Clean output."}}]}',
+                b"data: [DONE]",
+            ]
+        )
+
+        class FakeResponse:
+            status_code = 200
+            text = ""
+
+            def iter_lines(self):
+                return response_lines
+
+            def close(self):
+                return None
+
+        captured = {}
+
+        def fake_post(url, json=None, headers=None, stream=None, timeout=None):
+            captured["url"] = url
+            captured["payload"] = json
+            return FakeResponse()
+
+        with patch("requests.post", side_effect=fake_post), patch(
+            "dual_llm.llm_provider.get_local_endpoint", return_value="http://localhost:8080"
+        ), patch(
+            "dual_llm.llm_provider.get_local_model", return_value="local"
+        ), patch(
+            "dual_llm.llm_provider.get_local_request_overrides",
+            return_value={
+                "temperature": 1.0,
+                "top_p": 1.0,
+                "min_p": 0.05,
+                "top_k": 0,
+                "top_n_sigma": 1.0,
+            },
+        ) as mock_get_overrides:
+            result = llm_provider._stream_local(
+                "Prompt",
+                model="write",
+                system="System",
+                silent=True,
+                max_words=100,
+            )
+
+        self.assertEqual(result, "Clean output.")
+        self.assertEqual(mock_get_overrides.call_args.args[0], "write")
+        self.assertEqual(captured["payload"]["temperature"], 1.0)
+        self.assertEqual(captured["payload"]["top_p"], 1.0)
+        self.assertEqual(captured["payload"]["min_p"], 0.05)
+        self.assertEqual(captured["payload"]["top_k"], 0)
+        self.assertEqual(captured["payload"]["top_n_sigma"], 1.0)
+
     def test_repetition_heuristics_flag_obvious_loop(self):
         text = ("the storm raged on and on and on " * 80).strip()
         self.assertGreaterEqual(text_quality.max_ngram_repetition_ratio(text), 0.18)
@@ -738,6 +1165,20 @@ class TestLLMProvider(unittest.TestCase):
         )
         self.assertLess(text_quality.max_ngram_repetition_ratio(text), 0.18)
         self.assertFalse(text_quality.looks_like_runaway_repetition(text))
+
+    def test_strip_leading_reasoning_preamble_recovers_heading_after_unclosed_think(self):
+        leaked = (
+            "<think>\n"
+            "Thinking Process:\n"
+            "- inspect prompt\n"
+            "- plan answer\n\n"
+            "# Chapter 3 — Glass Hours\n\n"
+            "### Beat 1: Arrival\n"
+            "Mara enters the greenhouse and notices the broken pane.\n"
+        )
+        cleaned = llm_provider._strip_leading_reasoning_preamble(leaked)
+        self.assertTrue(cleaned.startswith("# Chapter 3 — Glass Hours"))
+        self.assertNotIn("Thinking Process", cleaned)
 
 
 class TestDraftQuality(unittest.TestCase):
@@ -761,7 +1202,7 @@ class TestDraftQuality(unittest.TestCase):
         self.assertTrue(any("too short" in issue.lower() for issue in issues))
 
 
-class TestSummarizeChapter(unittest.TestCase):
+class TestSummarizeChapter(TempWorkspaceCase):
     def test_build_summary_prompt_requests_rough_state_tracking(self):
         prompt = summarize_chapter_module.build_summary_prompt(
             2,
@@ -772,6 +1213,213 @@ class TestSummarizeChapter(unittest.TestCase):
         self.assertIn("### Chapter 2 — [SHORT TITLE]", prompt)
         self.assertIn("- Character end states:", prompt)
         self.assertIn("- Open threads:", prompt)
+
+    def test_summarize_repairs_malformed_next_brief_before_writing(self):
+        chapter_2_draft_path = os.path.join(self.chapters_dir, "chapter_002_draft.txt")
+        chapter_3_brief_path = os.path.join(self.chapters_dir, "chapter_003_beats.md")
+        with open(chapter_2_draft_path, "w") as handle:
+            handle.write("Chapter two draft prose with enough detail to summarize.")
+
+        outputs = [
+            "### Chapter 2 — Rough State\n- Sequence:\n  - Mara returns home.\n- Plot facts established:\n  - The greenhouse is unlocked.\n- Character end states:\n  - Mara: outside, tense.\n- Open threads:\n  - Who entered the greenhouse?\n",
+            (
+                "<think>\nThinking Process:\n- analyze prompt\n\n"
+                "# Chapter 3 — Glass Hours\n\n"
+                "### Beat 1: Arrival\n"
+                "Mara steps into the greenhouse before dawn, tracks the draft through broken glass, and realizes someone has already disturbed the room.\n\n"
+                "### Beat 2: Search\n"
+                "She checks the workbench, studies the disturbed soil, and connects the missing ledger to the unsigned letter from earlier.\n\n"
+                "### Beat 3: Confrontation\n"
+                "A hidden speaker forces her to face the family secret directly, and she understands why the greenhouse was sealed.\n"
+            ),
+            (
+                "# Chapter 3 — Glass Hours\n\n"
+                "### Beat 1: Arrival\n"
+                "Mara steps into the greenhouse before dawn, tracks the draft through broken glass, and realizes someone has already disturbed the room.\n\n"
+                "### Beat 2: Search\n"
+                "She checks the workbench, studies the disturbed soil, and connects the missing ledger to the unsigned letter from earlier.\n\n"
+                "### Beat 3: Confrontation\n"
+                "A hidden speaker forces her to face the family secret directly, and she understands why the greenhouse was sealed.\n\n"
+                "### Beat 4: Choice\n"
+                "She decides to stay through sunrise and learn the rest in person, ending the chapter with a deliberate choice to remain inside.\n"
+            ),
+        ]
+
+        with self.patch_summarize_chapter_paths(), patch.object(
+            summarize_chapter_module, "stream_llm", side_effect=outputs
+        ), patch.object(
+            summarize_chapter_module, "get_total_chapters", return_value=3
+        ), patch.object(
+            summarize_chapter_module, "get_word_count_target", return_value=9000
+        ), patch.object(
+            sys, "argv", ["summarize_chapter.py", "2", "--quiet"]
+        ):
+            summarize_chapter_module.main()
+
+        with open(chapter_3_brief_path) as handle:
+            content = handle.read()
+        self.assertTrue(content.startswith("# Chapter 3 — Glass Hours"))
+        self.assertNotIn("<think>", content)
+
+    def test_salvage_chapter_beats_adds_missing_heading_from_outline(self):
+        malformed = (
+            "### Beat 1: Arrival\n"
+            "Mara steps into the greenhouse before dawn, tracks the draft through broken glass, and realizes someone has already disturbed the room.\n\n"
+            "### Beat 2: Search\n"
+            "She checks the workbench, studies the disturbed soil, and connects the missing ledger to the unsigned letter from earlier.\n\n"
+            "### Beat 3: Choice\n"
+            "She decides to remain inside until sunrise so the truth cannot slip away again.\n"
+        )
+
+        repaired = story_utils.salvage_beats_document(
+            malformed,
+            chapter_number=3,
+            chapter_title="Glass Hours",
+        )
+
+        self.assertTrue(repaired.startswith("# Chapter 3 — Glass Hours"))
+        self.assertIn("### Beat 2: Search", repaired)
+
+
+class TestEndToEndRegressions(TempWorkspaceCase):
+    def test_fixture_beats_finalize_without_repair_round_trip(self):
+        fixture = REGRESSION_FIXTURES["beats_with_reasoning_leak"]
+
+        llm_calls = []
+        repaired_fixture = (
+            "# Chapter 2 — The Return\n\n"
+            "### Beat 1: Arrival\n"
+            "Mara returns home, studies the greenhouse door, and sees that the bolt is set from the inside.\n\n"
+            "### Beat 2: Unease\n"
+            "She circles the house, hears movement after midnight, and realizes fear is not distorting the sound.\n\n"
+            "### Beat 3: Decision\n"
+            "She chooses to investigate before dawn because waiting is making the house feel more dangerous.\n\n"
+            "### Beat 4: Threshold\n"
+            "She takes the key from her pocket and approaches the greenhouse, ending the chapter on the brink of entry.\n"
+        )
+
+        def fake_llm_call(user_prompt, system_prompt):
+            llm_calls.append((user_prompt, system_prompt))
+            return repaired_fixture
+
+        result = story_utils.finalize_beats_document(
+            fixture["raw"],
+            chapter_number=fixture["chapter_number"],
+            chapter_title=fixture["chapter_title"],
+            current_chapter_target_prompt="CURRENT CHAPTER TARGET: keep pressure concrete",
+            llm_call=fake_llm_call,
+        )
+
+        self.assertTrue(result["repaired"])
+        self.assertFalse(result["strict_retry"])
+        self.assertEqual(len(llm_calls), 1)
+        self.assertTrue(result["content"].startswith("# Chapter 2 — The Return"))
+        self.assertNotIn("<think>", result["content"])
+        self.assertNotIn("Thinking Process", result["content"])
+        self.assertIn("### Beat 3: Decision", result["content"])
+
+    def test_fixture_summary_update_round_trip_strips_reasoning_everywhere(self):
+        fixture = REGRESSION_FIXTURES["summary_and_cumulative_reasoning_leak"]
+
+        summary_block = story_utils.sanitize_summary_document(
+            fixture["summary_raw"],
+            chapter_number=2,
+            fallback_title="The Return",
+        )
+        cumulative = story_utils.sanitize_cumulative_summary_document(fixture["cumulative_raw"])
+        updated = story_utils.upsert_chapter_summary(cumulative, 2, summary_block)
+        updated = story_utils.set_completed_chapters(updated, 2)
+        updated = story_utils.sanitize_cumulative_summary_document(updated)
+
+        self.assertIn("### Chapter 1 — The Letter", updated)
+        self.assertIn("### Chapter 2 — The Return", updated)
+        self.assertIn("- **Completed Chapters:** 2", updated)
+        self.assertNotIn("<think>", updated)
+        self.assertNotIn("Thinking Process", updated)
+
+    def test_fixture_draft_sanitize_then_compile_round_trip(self):
+        fixture = REGRESSION_FIXTURES["chapter_draft_with_reasoning_and_legacy_header"]
+        sanitized_draft = story_utils.sanitize_chapter_draft_document(fixture["draft_raw"])
+        sanitized_prose = compile_module.extract_draft_prose(sanitized_draft)
+
+        self.assertEqual(
+            sanitized_prose,
+            "Mara crossed the greenhouse and lifted the ledger from the wet bench.",
+        )
+
+        with open(os.path.join(self.chapters_dir, "chapter_001_draft.txt"), "w") as handle:
+            handle.write(fixture["draft_raw"])
+        with open(os.path.join(self.chapters_dir, "chapter_002_draft.txt"), "w") as handle:
+            handle.write("Chapter two prose.")
+
+        compiled_markdown, chapter_count = compile_module.build_compiled_markdown(self.temp_dir)
+
+        self.assertEqual(chapter_count, 2)
+        self.assertIn("Mara crossed the greenhouse and lifted the ledger from the wet bench.", compiled_markdown)
+        self.assertNotIn("# Chapter 1 Draft", compiled_markdown)
+        self.assertNotIn("Generated:", compiled_markdown)
+        self.assertNotIn("<think>", compiled_markdown)
+
+    def test_summarize_chapter_regression_pipeline_writes_clean_summary_and_next_brief(self):
+        chapter_1_draft_path = os.path.join(self.chapters_dir, "chapter_001_draft.txt")
+        with open(chapter_1_draft_path, "w") as handle:
+            handle.write(
+                "Mara returned home in the rain, found the greenhouse bolted from the inside, "
+                "and decided she would not wait until morning to investigate."
+            )
+
+        outputs = [
+            (
+                "<think>\n"
+                "Thinking Process:\n"
+                "- inspect draft\n\n"
+                "### Chapter 1 — The Return\n"
+                "- Sequence:\n"
+                "  - Mara returns home and finds the greenhouse bolted from the inside.\n"
+                "- Plot facts established:\n"
+                "  - Someone is already on the property.\n"
+                "- Character end states:\n"
+                "  - Mara: outside the greenhouse, tense, committed to investigating.\n"
+                "- Open threads:\n"
+                "  - Who is inside the greenhouse?\n"
+            ),
+            REGRESSION_FIXTURES["beats_with_reasoning_leak"]["raw"],
+            (
+                "# Chapter 2 — The Return\n\n"
+                "### Beat 1: Arrival\n"
+                "Mara returns home, studies the greenhouse door, and sees that the bolt is set from the inside.\n\n"
+                "### Beat 2: Unease\n"
+                "She circles the house, hears movement after midnight, and realizes fear is not distorting the sound.\n\n"
+                "### Beat 3: Decision\n"
+                "She chooses to investigate before dawn, pockets the greenhouse key, checks the dark windows one last time, and commits herself because waiting is making the house feel more dangerous.\n\n"
+                "### Beat 4: Threshold\n"
+                "She takes the key from her pocket, approaches the greenhouse, hears movement behind the glass, and reaches for the lock with the chapter ending on the brink of entry.\n"
+            ),
+        ]
+
+        with self.patch_summarize_chapter_paths(), patch.object(
+            summarize_chapter_module, "stream_llm", side_effect=outputs
+        ), patch.object(
+            summarize_chapter_module, "get_total_chapters", return_value=3
+        ), patch.object(
+            summarize_chapter_module, "get_word_count_target", return_value=9000
+        ):
+            result = summarize_chapter_module.summarize_chapter(1, quiet=True)
+
+        self.assertEqual(result["chapter"], 1)
+        self.assertEqual(result["next_chapter"], 2)
+
+        with open(self.summary_path) as handle:
+            summary_content = handle.read()
+        with open(self.chapter_2_brief_path) as handle:
+            next_brief_content = handle.read()
+
+        self.assertIn("### Chapter 1 — The Return", summary_content)
+        self.assertNotIn("<think>", summary_content)
+        self.assertNotIn("Thinking Process", summary_content)
+        self.assertTrue(next_brief_content.startswith("# Chapter 2 — The Return"))
+        self.assertNotIn("<think>", next_brief_content)
+        self.assertNotIn("Thinking Process", next_brief_content)
 
 
 class TestCLIWithTempProject(unittest.TestCase):
@@ -801,7 +1449,19 @@ class TestCLIWithTempProject(unittest.TestCase):
 
     def test_generate_chapter_all_with_no_briefs_exits_cleanly(self):
         result = self.run_cli("generate_chapter.py", "--all")
-        self.assertIn("no chapter beats found", result.stdout.lower() + result.stderr.lower())
+        self.assertIn("no chapter briefs found", result.stdout.lower() + result.stderr.lower())
+        self.assertEqual(result.returncode, 1)
+
+    def test_generate_chapter_all_with_story_bible_and_no_briefs_shows_recovery_options(self):
+        with open(os.path.join(self.temp_project, "story_bible.md"), "w") as handle:
+            handle.write(SAMPLE_STORY_BIBLE)
+
+        result = self.run_cli("generate_chapter.py", "--all")
+        output = result.stdout.lower() + result.stderr.lower()
+        self.assertIn("an existing story_bible.md was found", output)
+        self.assertIn("repair_beats.py --force 1", output)
+        self.assertIn("plan_chapters.py --regen-beats", output)
+        self.assertEqual(result.returncode, 1)
 
     def test_help_commands_are_stable(self):
         for script in ["plan_chapters.py", "generate_chapter.py", "project.py"]:

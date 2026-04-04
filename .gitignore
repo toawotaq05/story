@@ -4,6 +4,9 @@ llm_raw_output.txt
 __pycache__/
 .pytest_cache/
 */__pycache__/
+.codex
+bookokrat.log
+temp_images/
 
 # Generated story content — project-specific (keep beats; generated drafts live alongside them)
 story_bible.md

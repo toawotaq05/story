@@ -16,13 +16,12 @@ from chapter_planning import build_chapter_beats_prompt
 from dual_llm import stream_llm
 from config import get_model
 from paths import (
-    CHAPTERS_DIR,
     CHAPTER_BEATS_TEMPLATE_PATH,
-    CUMULATIVE_SUMMARY_PATH,
-    STORY_BIBLE_PATH,
     chapter_beats_path,
+    get_project_paths,
 )
 from story_utils import is_valid_beats_document, parse_beats
+from story_utils import sanitize_beats_document
 
 
 def validate_beats_file(beats_path):
@@ -43,6 +42,7 @@ def validate_beats_file(beats_path):
 
 def regenerate_beats(chapter, force=False):
     chapter_str = str(chapter)
+    runtime_paths = get_project_paths()
     beats_path = chapter_beats_path(chapter_str)
 
     if not force:
@@ -58,15 +58,15 @@ def regenerate_beats(chapter, force=False):
         else:
             print(f"[{chapter_str}] Beats file doesn't exist. Generating...")
 
-    if not os.path.exists(STORY_BIBLE_PATH):
+    if not os.path.exists(runtime_paths.story_bible_path):
         print(f"ERROR: Missing story_bible.md")
         return False
-    with open(STORY_BIBLE_PATH) as f:
+    with open(runtime_paths.story_bible_path) as f:
         story_bible = f.read()
 
     cumulative_content = ""
-    if os.path.exists(CUMULATIVE_SUMMARY_PATH):
-        with open(CUMULATIVE_SUMMARY_PATH) as f:
+    if os.path.exists(runtime_paths.cumulative_summary_path):
+        with open(runtime_paths.cumulative_summary_path) as f:
             cumulative_content = f.read()
 
     with open(CHAPTER_BEATS_TEMPLATE_PATH) as f:
@@ -80,7 +80,11 @@ def regenerate_beats(chapter, force=False):
     )
 
     print(f"[{chapter_str}] Generating beats...")
-    content = stream_llm(user_prompt, model=get_model("beats"), system=system_prompt, silent=False)
+    content = sanitize_beats_document(
+        stream_llm(user_prompt, model=get_model("beats"), system=system_prompt, silent=False),
+        chapter_number=chapter_str,
+        chapter_title=f"Chapter {chapter_str}",
+    )
 
     if not content or len(content.strip()) < 50:
         print(f"ERROR: Beats output is empty or too short ({len(content.strip()) if content else 0} chars)")
@@ -89,7 +93,7 @@ def regenerate_beats(chapter, force=False):
         print(f"ERROR: Generated beats did not match expected chapter-beats format")
         return False
 
-    os.makedirs(CHAPTERS_DIR, exist_ok=True)
+    os.makedirs(runtime_paths.chapters_dir, exist_ok=True)
     with open(beats_path, "w") as f:
         f.write(content)
 
@@ -109,7 +113,7 @@ def main():
     parser.add_argument("--force", action="store_true", help="Force regeneration even if file is valid")
     args = parser.parse_args()
 
-    chapters_dir = CHAPTERS_DIR
+    chapters_dir = get_project_paths().chapters_dir
 
     if args.all:
         import glob

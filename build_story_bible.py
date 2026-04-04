@@ -13,20 +13,20 @@ from dual_llm import stream_llm
 from config import get_default_chapters, get_word_count_target, is_local_mode
 from paths import (
     CHAPTER_BEATS_TEMPLATE_PATH,
-    CUMULATIVE_SUMMARY_PATH,
-    STORY_BIBLE_PATH,
     STORY_BIBLE_TEMPLATE_PATH,
     chapter_beats_path,
     ensure_runtime_dirs,
+    get_project_paths,
     raw_output_path,
 )
 from story_utils import (
-    analyze_beats_document,
     build_initial_cumulative_summary,
     build_outline_section,
+    finalize_beats_document,
     is_valid_beats_document,
     merge_story_bible_and_outline,
     parse_outline_entries,
+    sanitize_story_bible_document,
     split_story_bible_and_outline,
 )
 
@@ -92,28 +92,25 @@ FORMAT:
 
 
 def repair_chapter_beats_if_needed(chapter_beats_content, chapter_number):
-    issues = analyze_beats_document(chapter_beats_content)
-    if not issues:
-        return chapter_beats_content, []
-
-    repair_prompt = (
-        f"Rewrite this chapter brief so it is clean and draftable for Chapter {chapter_number}.\n\n"
-        f"ISSUES TO FIX:\n" + "\n".join(f"- {issue}" for issue in issues) + "\n\n"
-        "REQUIREMENTS:\n"
-        "- Output only the chapter brief document\n"
-        "- Start with a '# Chapter N — Title' heading\n"
-        "- Use 4-6 concrete '### Beat N: Label' sections\n"
-        "- Keep the same planned chapter events and ending direction\n"
-        "- Remove vague filler, malformed headings, and placeholder-like formatting\n\n"
-        f"CURRENT BRIEF:\n{chapter_beats_content}"
+    result = finalize_beats_document(
+        chapter_beats_content,
+        chapter_number=chapter_number,
+        chapter_title=f"Chapter {chapter_number}",
+        current_chapter_target_prompt="",
+        llm_call=lambda user_prompt, system_prompt: stream_llm(
+            user_prompt,
+            model="beats",
+            system=system_prompt,
+        ),
+        repair_requirements=[
+            "Output only the chapter brief document",
+            "Start with a '# Chapter N — Title' heading",
+            "Use 4-6 concrete '### Beat N: Label' sections",
+            "Keep the same planned chapter events and ending direction",
+            "Remove vague filler, malformed headings, and placeholder-like formatting",
+        ],
     )
-    repaired = stream_llm(
-        repair_prompt,
-        model="beats",
-        system="You repair malformed chapter briefs into clean drafting plans.",
-    )
-    return repaired, issues
-
+    return result["content"], result["initial_issues"]
 
 def main():
     if len(sys.argv) < 2:
@@ -123,6 +120,7 @@ def main():
     concept = sys.argv[1]
     default_chapters = get_default_chapters()
     word_count_target = get_word_count_target()
+    runtime_paths = get_project_paths()
 
     # Load templates
     ensure_runtime_dirs()
@@ -181,7 +179,9 @@ Do not include any preamble, commentary, or explanation — output only the comp
 
     print("--- Step 1: Generating Story Bible ---")
     print()
-    story_bible_content = stream_llm(bible_prompt, model="story_bible", system=system_prompt)
+    story_bible_content = sanitize_story_bible_document(
+        stream_llm(bible_prompt, model="story_bible", system=system_prompt)
+    )
     print()
 
     # Save raw for debugging
@@ -205,13 +205,13 @@ Do not include any preamble, commentary, or explanation — output only the comp
         print("INFO: Regenerated chapter outline before writing story_bible.md")
         print(f"Reason: {outline_regen_reason}")
 
-    with open(STORY_BIBLE_PATH, "w") as f:
+    with open(runtime_paths.story_bible_path, "w") as f:
         f.write(story_bible_content)
     print("✓ story_bible.md written")
 
     # Initialize cumulative_summary.md if it doesn't exist
-    if not os.path.exists(CUMULATIVE_SUMMARY_PATH):
-        with open(CUMULATIVE_SUMMARY_PATH, "w") as f:
+    if not os.path.exists(runtime_paths.cumulative_summary_path):
+        with open(runtime_paths.cumulative_summary_path, "w") as f:
             f.write(build_initial_cumulative_summary(default_chapters, word_count_target))
         print("✓ cumulative_summary.md initialized")
 
@@ -234,6 +234,25 @@ Do not include any preamble, commentary, or explanation — output only the comp
     print("--- Step 2: Generating Chapter 1 Beats ---")
     print()
     chapter_beats_content = stream_llm(beats_prompt, model="beats", system=beats_system)
+    brief_result = finalize_beats_document(
+        chapter_beats_content,
+        chapter_number=1,
+        chapter_title="Chapter 1",
+        current_chapter_target_prompt=beats_prompt,
+        llm_call=lambda user_prompt, system_prompt: stream_llm(
+            user_prompt,
+            model="beats",
+            system=system_prompt,
+        ),
+        repair_requirements=[
+            "Output only the chapter brief document",
+            "Start with a '# Chapter N — Title' heading",
+            "Use 4-6 concrete '### Beat N: Label' sections",
+            "Keep the same planned chapter events and ending direction",
+            "Remove vague filler, malformed headings, and placeholder-like formatting",
+        ],
+    )
+    chapter_beats_content = brief_result["content"]
     print()
 
     with open(raw_output_path("llm_raw_beats.txt"), "w") as f:
@@ -243,15 +262,13 @@ Do not include any preamble, commentary, or explanation — output only the comp
         print("ERROR: Chapter 1 beats content is empty or too short")
         sys.exit(1)
 
-    if not is_valid_beats_document(chapter_beats_content):
-        repaired_content, repair_issues = repair_chapter_beats_if_needed(chapter_beats_content, 1)
-        reason = "; ".join(repair_issues[:3]) if repair_issues else "invalid chapter brief format"
+    if brief_result["repaired"]:
+        reason = "; ".join(brief_result["initial_issues"][:3]) if brief_result["initial_issues"] else "invalid chapter brief format"
         print("WARNING: Chapter 1 brief is malformed. Attempting one repair pass.")
         print(f"Reason: {reason}")
-        chapter_beats_content = repaired_content
         print()
 
-    issues = analyze_beats_document(chapter_beats_content)
+    issues = brief_result["issues"]
     if issues:
         print("ERROR: Chapter 1 brief is still malformed after repair.")
         print(f"Issues: {'; '.join(issues[:3])}")
@@ -264,7 +281,7 @@ Do not include any preamble, commentary, or explanation — output only the comp
     print()
     print("=== Done ===")
     print("Next steps:")
-    print(f"  1. Review {STORY_BIBLE_PATH}")
+    print(f"  1. Review {runtime_paths.story_bible_path}")
     print(f"  2. Review {chapter_beats_path(1)}")
     print("  3. python3 generate_chapter.py 1")
 

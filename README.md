@@ -27,10 +27,32 @@ If you do nothing, the active project defaults to `workspace/default/`.
 ## Core Flow
 
 1. `build_story_bible.py "concept"` creates the story bible, initializes `cumulative_summary.md`, and generates Chapter 1's chapter brief.
-2. `plan_chapters.py --beats` fills or refreshes the chapter outline and generates chapter briefs for every planned chapter.
-3. `generate_chapter.py N` writes one coherent chapter draft from the story bible, cumulative summary, and `chapter_N_beats.md`.
-4. `summarize_chapter.py N` records story state and generates the next chapter brief if needed.
-5. `compile.py` assembles drafted chapters into `<project>.md` and, when `pandoc` is available, `<project>.epub`.
+2. `generate_chapter.py --all` runs the sequential drafting loop: draft chapter, summarize it, generate the next chapter brief, and continue.
+3. `plan_chapters.py --beats` is optional when you want an upfront planning pass that fills or refreshes the outline and generates chapter briefs for every planned chapter before drafting.
+4. `generate_chapter.py N` writes one coherent chapter draft from the story bible, cumulative summary, and `chapter_N_beats.md`.
+5. `summarize_chapter.py N` records story state and generates the next chapter brief if needed.
+6. `compile.py` assembles drafted chapters into `<project>.md` and, when `pandoc` is available, `<project>.epub`.
+
+## Recommended Workflow
+
+Default quickstart:
+
+1. `python3 build_story_bible.py "your concept"`
+2. `python3 generate_chapter.py --all`
+
+That is the recommended end-to-end workflow for actual drafting.
+
+- `build_story_bible.py` creates the story bible, outline, cumulative summary scaffold, and Chapter 1 brief.
+- `generate_chapter.py --all` then uses the sequential loop, which is usually the best quality path because each next brief is generated from the cumulative summary of what was actually written.
+- This means you do not need `plan_chapters.py --beats` for normal drafting.
+
+Use `plan_chapters.py --beats` only when you want an upfront planning/review pass.
+
+- Upfront chapter briefs from `plan_chapters.py --beats` are outline-driven planning artifacts.
+- Sequential briefs generated during drafting are usually the better authoritative source because they also use the cumulative summary.
+- A good optional workflow is: run `plan_chapters.py --beats`, review or edit the outline/briefs, then still draft with `generate_chapter.py --all`.
+
+If a chapter brief fails validation during `plan_chapters.py --beats`, the run now stops on that chapter and exits nonzero instead of continuing into a partial-error batch.
 
 ### Dynamic Chapter Pacing
 
@@ -100,6 +122,7 @@ This keeps the planning layer useful without forcing the prose layer into artifi
 ```sh
 python3 project.py init haunted_greenhouse
 python3 build_story_bible.py "your concept"
+python3 generate_chapter.py --all
 python3 plan_chapters.py --beats
 python3 generate_chapter.py 1
 python3 generate_chapter.py 1 --revise
@@ -138,8 +161,9 @@ Notes:
 - `compile.py` reads drafts from the active project by default
 - `--output` controls where the compiled Markdown is written; if you pass a directory, it writes `book.md` inside it
 - If `pandoc` is installed on `PATH`, the compiler also writes a sibling `.epub`
+- `compile.py` also copies each generated `.epub` into [`workspace/compiled_epubs/`](/home/aastro/books/book_generation/workspace/compiled_epubs)
 
-That workflow now means:
+That drafting loop means:
 
 1. draft chapter
 2. summarize it
@@ -151,15 +175,49 @@ The local OpenAI-compatible path can work with thinking-capable models, includin
 
 - Set `local_mode` to `true`
 - Point `local_model` at the model your server has loaded
-- Use `local_request_overrides` in `config.json` for provider-specific fields
+- Use local sampling presets when a model wants specific sampler settings
+- Keep `local_request_overrides` for final provider-specific overrides that should always win
 
-Example:
+Resolution order for local request fields is:
+
+1. `local_request_defaults`
+2. `sampling_presets`
+3. `task_presets`
+4. `model_presets`
+5. `local_task_request_overrides`
+6. `local_model_request_overrides`
+7. `local_request_overrides`
+
+Minimal example:
 
 ```json
 {
   "local_mode": true,
   "local_endpoint": "http://localhost:8080",
   "local_model": "qwen3-32b-thinking",
+  "local_request_defaults": {
+    "chat_template_kwargs": {
+      "enable_thinking": true
+    }
+  },
+  "sampling_presets": {
+    "creative_open": {
+      "temperature": 1.0,
+      "top_p": 1.0,
+      "min_p": 0.05,
+      "top_k": 0,
+      "top_n_sigma": 1.0
+    },
+    "summary_strict": {
+      "temperature": 0.2,
+      "top_p": 0.8
+    }
+  },
+  "task_presets": {
+    "write": "creative_open",
+    "beats": "creative_open",
+    "summarize": "summary_strict"
+  },
   "local_request_overrides": {
     "chat_template_kwargs": {
       "enable_thinking": true
@@ -167,6 +225,20 @@ Example:
   }
 }
 ```
+
+That lets you keep model-tuning out of code. For example, if one prose model likes `temperature: 1.0`, `top_p: 1.0`, `min_p: 0.05`, and `top_k: 0`, define that once as a preset and point `write` and `beats` at it.
+
+If you swap actual model IDs often, you can also bind a preset directly to the configured model string:
+
+```json
+{
+  "model_presets": {
+    "openrouter/some-model": "creative_open"
+  }
+}
+```
+
+Use task presets for most tuning. Add model presets only when the same task may run on different models that need different sampler settings.
 
 The pipeline already strips `<think>`-style blocks from saved outputs and prefers the final answer text when the server streams reasoning separately.
 

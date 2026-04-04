@@ -18,19 +18,20 @@ from chapter_planning import build_chapter_beats_prompt, build_pacing_prompt
 from dual_llm import stream_llm
 from config import get_model, get_default_chapters
 from paths import (
-    CHAPTERS_DIR,
     CHAPTER_BEATS_TEMPLATE_PATH,
-    STORY_BIBLE_PATH,
     chapter_beats_path,
     ensure_runtime_dirs,
+    get_project_paths,
     raw_output_path,
 )
 from story_utils import (
-    analyze_beats_document,
     build_outline_section,
+    finalize_beats_document,
     is_valid_beats_document,
     merge_story_bible_and_outline,
     parse_outline_entries,
+    sanitize_outline_document,
+    sanitize_story_bible_document,
     split_story_bible_and_outline,
 )
 
@@ -52,8 +53,9 @@ def main():
                         help="Analyze story structure and generate chapter pacing weights")
     args = parser.parse_args()
 
-    story_bible_path = STORY_BIBLE_PATH
-    chapters_dir = CHAPTERS_DIR
+    runtime_paths = get_project_paths()
+    story_bible_path = runtime_paths.story_bible_path
+    chapters_dir = runtime_paths.chapters_dir
 
     num_chapters = args.chapters or DEFAULT_CHAPTERS
 
@@ -140,7 +142,7 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
 
         print("Streaming outline:")
         print("-" * 40)
-        outline_output = stream_llm(outline_prompt, model="outline")
+        outline_output = sanitize_outline_document(stream_llm(outline_prompt, model="outline"))
         print("-" * 40)
         print()
 
@@ -150,6 +152,7 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
 
         if not has_story_bible:
             story_bible_content, outline_content = split_story_bible_and_outline(outline_output)
+            story_bible_content = sanitize_story_bible_document(story_bible_content)
             if not outline_content:
                 print("ERROR: Could not parse chapter outline from combined output")
                 sys.exit(1)
@@ -158,7 +161,7 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
                 f.write(story_bible_content)
             print(f"✓ story_bible.md written ({len(story_bible_content.split())} words)")
         else:
-            outline_content = outline_output.strip()
+            outline_content = sanitize_outline_document(outline_output)
 
         outline_entries = parse_outline_entries(outline_content)
         if not outline_entries:
@@ -198,6 +201,8 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
             with open(template_path) as f:
                 beats_template = f.read()
 
+        failed_chapters = []
+
         for entry in chapter_entries:
             ch_num = str(entry.number)
             ch_title = entry.title
@@ -214,7 +219,7 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
             if "{chapter}" in current_template:
                 current_template = current_template.format(chapter=ch_num, title=ch_title)
             user_prompt = build_chapter_beats_prompt(
-                story_bible_core,
+                full_text,
                 ch_num,
                 cumulative_summary="",
                 beats_template=current_template,
@@ -222,43 +227,56 @@ Do not include any preamble, commentary, or extra text. Output only the story bi
 
             beats_content = stream_llm(user_prompt, model=get_model("beats"), system=system_prompt)
             print()
-
-            issues = analyze_beats_document(beats_content)
-            if issues:
+            brief_result = finalize_beats_document(
+                beats_content,
+                chapter_number=ch_num,
+                chapter_title=ch_title,
+                current_chapter_target_prompt=user_prompt,
+                llm_call=lambda prompt_text, prompt_system: stream_llm(
+                    prompt_text,
+                    model=get_model("beats"),
+                    system=prompt_system,
+                ),
+                repair_requirements=[
+                    "Keep the same planned chapter events and ending direction",
+                    "Output only the chapter brief document",
+                    "Use 4-6 concrete, distinct beat sections",
+                    "Remove placeholders, duplicated beats, and vague filler",
+                ],
+            )
+            beats_content = brief_result["content"]
+            issues = brief_result["issues"]
+            if brief_result["repaired"]:
                 print(
                     f"  Repairing Chapter {ch_num} brief because: "
-                    + "; ".join(issues[:3])
-                )
-                repair_prompt = (
-                    f"Rewrite this chapter brief so it is clean and draftable for Chapter {ch_num}.\n\n"
-                    f"ISSUES TO FIX:\n" + "\n".join(f"- {issue}" for issue in issues) + "\n\n"
-                    "REQUIREMENTS:\n"
-                    "- Keep the same planned chapter events and ending direction\n"
-                    "- Output only the chapter brief document\n"
-                    "- Use 4-6 concrete, distinct beat sections\n"
-                    "- Remove placeholders, duplicated beats, and vague filler\n\n"
-                    f"CURRENT BRIEF:\n{beats_content}"
-                )
-                beats_content = stream_llm(
-                    repair_prompt,
-                    model=get_model("beats"),
-                    system="You repair malformed chapter briefs into clean drafting plans.",
+                    + "; ".join(brief_result["initial_issues"][:3])
                 )
                 print()
-                issues = analyze_beats_document(beats_content)
-
             if issues:
                 print(f"  ⚠ WARNING: Generated beats for Chapter {ch_num} still look wrong")
                 print(f"  ⚠ Issues: {'; '.join(issues[:3])}")
-                print(f"  ⚠ NOT writing chapter_{ch_num:03d}_beats.md — run with --regen-beats to retry")
+                print(f"  ⚠ NOT writing chapter_{int(ch_num):03d}_beats.md — run with --regen-beats to retry")
                 print(f"  ⚠ If this persists, check if local LLM context window is too small")
-                continue
+                failed_chapters.append((int(ch_num), issues[:3]))
+                print()
+                print(
+                    f"Stopping beats generation after Chapter {ch_num} failure so later briefs "
+                    f"are not generated in a partial-error batch."
+                )
+                break
 
             with open(beats_file, "w") as f:
                 f.write(beats_content)
-            print(f"  ✓ chapter_{ch_num:03d}_beats.md written")
+            print(f"  ✓ chapter_{int(ch_num):03d}_beats.md written")
 
         print()
+        if failed_chapters:
+            failed_num, failed_issues = failed_chapters[0]
+            print(f"ERROR: Chapter brief generation stopped at Chapter {failed_num}.")
+            print(f"Issues: {'; '.join(failed_issues)}")
+            print("Fix the prompt/model settings, then rerun with --regen-beats.")
+            sys.exit(1)
+
         print(f"✓ All chapter briefs generated")
         print()
 

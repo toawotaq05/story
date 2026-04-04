@@ -37,9 +37,9 @@ def _load_pacing_weights():
     """
     import json
     import os
-    from paths import PROJECT_DIR
+    from paths import get_project_dir
     
-    pacing_path = os.path.join(PROJECT_DIR, "pacing_weights.json")
+    pacing_path = os.path.join(get_project_dir(), "pacing_weights.json")
     if not os.path.exists(pacing_path):
         return None
     
@@ -450,38 +450,21 @@ def build_pacing_prompt(story_bible_text, outline_section, num_chapters):
 
     The LLM receives the full story bible and outline, then assigns a weight factor
     to each chapter based on narrative importance, action density, emotional weight,
-    and expected content volume. Weights are normalized so the average remains 1.0,
-    meaning the total word budget is preserved.
+    and expected content volume. Weights are rough "feel" deciders, not exact math.
     """
-    return f"""You are a story editor analyzing the narrative pacing of a book project.
+    return f"""You are assigning rough pacing weights to chapters in a story.
+This is a feel-based estimate, not a math problem. Do not overthink it and do not show your reasoning.
 
 Below is the complete story bible and chapter outline for a story.
 
 TASK
-Assign a relative pacing weight to each chapter from 1 to {num_chapters}.
+Give each chapter (1 to {num_chapters}) a simple weight that reflects how much room it should have:
 
-A pacing weight determines how many words that chapter should get:
-- Weight 1.0 = normal chapter length (baseline)
-- Weight 1.3-1.5 = important chapter that deserves more detail (climax, turning point,
-  heavy action, or complex emotional development)
-- Weight 0.6-0.8 = lighter or transitional chapter (setup, aftermath, quick plot bridge)
+- 0.7 to 0.8 = light chapter, quick setup, transition, or bridge between bigger moments
+- 0.9 to 1.0 = normal chapter, steady story progression
+- 1.2 to 1.4 = heavy chapter: big scene, climax, major turning point, lots to show
 
-GUIDELINES FOR ASSIGNING WEIGHTS
-- Climax chapter(s): 1.3-1.5 (the emotional or action peak of the story)
-- Resolution chapter: 1.2-1.4 (tying up plot threads, emotional closure)
-- Inciting incident / first plot point: 1.1-1.3 (needs room to establish turning point)
-- Midpoint chapter: 1.2-1.3 (major story turn, reversal, revelation)
-- Transition/bridge chapters: 0.7-0.85 (move characters between major events)
-- Setup/aftermath chapters: 0.7-0.9 (lower action density)
-- Standard chapters: 0.9-1.1 (normal narrative progression)
-
-IMPORTANT CONSTRAINTS
-- Aim for an average weight of about 1.0 across all chapters
-- The highest weight and lowest weight should differ by at least 0.5
-- At least 2-3 chapters should be noticeably above 1.1
-- At least 2-3 chapters should be noticeably below 0.9
-- Do NOT give every chapter the same weight
-- Weights must be between 0.5 and 1.6
+Use your judgment based on the outline. Important chapters get more room, quiet chapters get less. Don't try to hit an exact average or make the math come out perfectly. Just make the important chapters bigger and the filler chapters smaller. Aim for at least a bit of variety so not everything is 1.0.
 
 STORY BIBLE:
 {story_bible_text}
@@ -490,9 +473,8 @@ CHAPTER OUTLINE:
 {outline_section}
 
 OUTPUT FORMAT
-Output ONLY a valid JSON object with this exact structure. No preamble, no explanation:
+Output ONLY a valid JSON object. No explanation, no reasoning, no checks:
 
-{{"chapter_weights": {{"1": 1.1, "2": 0.8, "3": 1.4, "4": 0.9, ...}}}}
+{{"chapter_weights": {{"1": 0.8, "2": 1.0, "3": 1.3, "4": 0.9, ...}}}}
 """
-
 

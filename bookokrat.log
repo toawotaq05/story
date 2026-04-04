@@ -1,8 +1,0 @@
-16:42:19 Starting Bookokrat EPUB reader
-16:42:19 [DEBUG] (1) bookokrat::settings: Loaded settings from "/home/aastro/.bookokrat_settings.yaml"
-16:42:19 [DEBUG] (1) bookokrat::theme: Applied saved theme: Kanagawa
-16:42:19 Image picker initial protocol type: Sixel
-16:42:19 Sixel protocol detected, using Sixel
-16:42:19 Final protocol type: Sixel
-16:42:19 [DEBUG] (1) bookokrat::main_app: Initial terminal size: 133x66
-16:42:32 Shutting down Bookokrat

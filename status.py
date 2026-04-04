@@ -6,19 +6,20 @@ Usage: python3 status.py
 """
 import os, glob, re
 from config import get_word_count_target
-from paths import CHAPTERS_DIR, CUMULATIVE_SUMMARY_PATH, STORY_BIBLE_PATH, PROJECT_DIR, get_current_project_name
+from paths import get_current_project_name, get_project_paths
 from story_utils import extract_story_title, extract_summary_headers, parse_completed_chapters, parse_outline_entries, split_story_bible_and_outline
 
 def main():
-    chapters_dir = CHAPTERS_DIR
-    story_bible = STORY_BIBLE_PATH
-    cumulative = CUMULATIVE_SUMMARY_PATH
+    runtime_paths = get_project_paths()
+    chapters_dir = runtime_paths.chapters_dir
+    story_bible = runtime_paths.story_bible_path
+    cumulative = runtime_paths.cumulative_summary_path
 
     print("=" * 50)
     print("STORY PIPELINE STATUS")
     print("=" * 50)
     print(f"Project: {get_current_project_name()}")
-    print(f"Project dir: {PROJECT_DIR}")
+    print(f"Project dir: {runtime_paths.project_dir}")
     print(f"Chapters dir: {chapters_dir}")
     print()
 

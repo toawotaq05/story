@@ -7,22 +7,30 @@ import argparse
 import os
 import sys
 
-from chapter_planning import build_chapter_beats_prompt, get_total_chapters
+from chapter_planning import build_chapter_beats_prompt, find_chapter_entry, get_total_chapters
 from config import get_model, get_word_count_target
 from dual_llm import stream_llm
 from paths import (
+    CHAPTER_BEATS_TEMPLATE_PATH,
     CUMULATIVE_SUMMARY_PATH,
     STORY_BIBLE_PATH,
-    CHAPTER_BEATS_TEMPLATE_PATH,
     chapter_beats_path,
     chapter_draft_path,
+    get_project_paths,
 )
 from story_utils import (
     build_initial_cumulative_summary,
     extract_summary_headers,
+    finalize_beats_document,
+    is_valid_beats_document,
+    sanitize_cumulative_summary_document,
+    sanitize_summary_document,
     set_completed_chapters,
     upsert_chapter_summary,
 )
+
+STORY_BIBLE_PATH = None
+CUMULATIVE_SUMMARY_PATH = None
 
 
 def parse_args():
@@ -38,6 +46,13 @@ def log(message, quiet=False):
     if not quiet:
         print(message)
 
+
+def _story_bible_path():
+    return STORY_BIBLE_PATH or get_project_paths().story_bible_path
+
+
+def _cumulative_summary_path():
+    return CUMULATIVE_SUMMARY_PATH or get_project_paths().cumulative_summary_path
 
 def build_summary_prompt(chapter, draft_content):
     return f"""Chapter to summarize:
@@ -75,22 +90,20 @@ Format your response EXACTLY as follows — do not add any preamble, commentary,
   - ..."""
 
 
-def main():
-    args = parse_args()
-    chapter = int(args.chapter)
+def summarize_chapter(chapter, quiet=False):
+    chapter = int(chapter)
     next_chapter = chapter + 1
     chapter_draft = chapter_draft_path(chapter)
     next_beats = chapter_beats_path(next_chapter)
-    cumulative = CUMULATIVE_SUMMARY_PATH
-    story_bible = STORY_BIBLE_PATH
+    cumulative = _cumulative_summary_path()
+    story_bible = _story_bible_path()
 
     if not os.path.exists(chapter_draft):
-        print(f"ERROR: Chapter draft not found: {chapter_draft}")
-        print(f"Run: python3 generate_chapter.py {chapter}")
-        sys.exit(1)
+        raise FileNotFoundError(
+            f"Chapter draft not found: {chapter_draft}\nRun: python3 generate_chapter.py {chapter}"
+        )
     if not os.path.exists(story_bible):
-        print(f"ERROR: Story bible not found: {story_bible}")
-        sys.exit(1)
+        raise FileNotFoundError(f"Story bible not found: {story_bible}")
 
     with open(chapter_draft) as f:
         draft_content = f.read()
@@ -106,7 +119,7 @@ def main():
                 )
             )
 
-    log(f"=== Summarizing Chapter {chapter} ===\n", args.quiet)
+    log(f"=== Summarizing Chapter {chapter} ===\n", quiet)
 
     system_prompt = (
         "You are a continuity tracker. Extract rough chapter state for later drafting. "
@@ -114,29 +127,35 @@ def main():
     )
     user_prompt = build_summary_prompt(chapter, draft_content)
 
-    log("Summarizing chapter (streaming):", args.quiet)
-    if not args.quiet:
+    log("Summarizing chapter (streaming):", quiet)
+    if not quiet:
         print("-" * 40)
-    summary = stream_llm(user_prompt, model=get_model("summarize"), system=system_prompt, silent=args.quiet, max_words=200)
-    if not args.quiet:
+    summary = stream_llm(user_prompt, model=get_model("summarize"), system=system_prompt, silent=quiet, max_words=200)
+    summary = sanitize_summary_document(
+        summary,
+        chapter_number=chapter,
+        fallback_title=f"Chapter {chapter}",
+    )
+    if not quiet:
         print("-" * 40)
         print()
 
     with open(cumulative) as f:
-        existing_content = f.read()
+        existing_content = sanitize_cumulative_summary_document(f.read())
 
     updated_content = upsert_chapter_summary(existing_content, chapter, summary)
     new_content = set_completed_chapters(updated_content, chapter)
+    new_content = sanitize_cumulative_summary_document(new_content)
     with open(cumulative, "w") as f:
         f.write(new_content)
 
-    log(f"✓ Chapter {chapter} summarized", args.quiet)
+    log(f"✓ Chapter {chapter} summarized", quiet)
 
     total_chapters = get_total_chapters(story_bible_text)
     if next_chapter > total_chapters:
-        log("Final chapter summarized; no next chapter brief needed.", args.quiet)
+        log("Final chapter summarized; no next chapter brief needed.", quiet)
     elif os.path.exists(next_beats):
-        log(f"Note: {next_beats} already exists — skipping brief generation.", args.quiet)
+        log(f"Note: {next_beats} already exists — skipping brief generation.", quiet)
     else:
         with open(CHAPTER_BEATS_TEMPLATE_PATH) as f:
             beats_template = f.read()
@@ -147,26 +166,76 @@ def main():
             beats_template=beats_template,
         )
 
-        log(f"\nGenerating Chapter {next_chapter} brief (streaming):", args.quiet)
-        if not args.quiet:
+        log(f"\nGenerating Chapter {next_chapter} brief (streaming):", quiet)
+        if not quiet:
             print("-" * 40)
         next_beats_content = stream_llm(
             user_prompt2,
             model=get_model("beats"),
             system="You are a story architect.",
-            silent=args.quiet,
+            silent=quiet,
             max_words=500,
         )
-        if not args.quiet:
+        if not quiet:
             print("-" * 40)
             print()
 
+        next_entry = find_chapter_entry(story_bible_text, next_chapter)
+        next_title = next_entry.title if next_entry else f"Chapter {next_chapter}"
+        brief_result = finalize_beats_document(
+            next_beats_content,
+            chapter_number=next_chapter,
+            chapter_title=next_title,
+            current_chapter_target_prompt=user_prompt2,
+            llm_call=lambda user_prompt, system_prompt: stream_llm(
+                user_prompt,
+                model=get_model("beats"),
+                system=system_prompt,
+                silent=quiet,
+                max_words=500,
+            ),
+        )
+        next_beats_content = brief_result["content"]
+
+        if brief_result["repaired"]:
+            reason = "; ".join(brief_result["initial_issues"][:3]) or "invalid chapter brief format"
+            log(
+                f"Warning: Chapter {next_chapter} brief was malformed. Attempting one repair pass. Reason: {reason}",
+                quiet,
+            )
+        issues = brief_result["issues"]
+        if issues:
+            raise ValueError(
+                f"ERROR: Chapter {next_chapter} brief is still malformed after repair: "
+                + "; ".join(issues[:3])
+            )
+
         with open(next_beats, "w") as f:
             f.write(next_beats_content)
-        log(f"✓ {next_beats} written", args.quiet)
+        log(f"✓ {next_beats} written", quiet)
+
+    return {
+        "chapter": chapter,
+        "next_chapter": next_chapter,
+        "total_chapters": total_chapters,
+        "summary_content": new_content,
+    }
+
+
+def main():
+    args = parse_args()
+    try:
+        result = summarize_chapter(args.chapter, quiet=args.quiet)
+    except (FileNotFoundError, ValueError) as exc:
+        print(str(exc))
+        sys.exit(1)
 
     if args.quiet:
         return
+
+    next_chapter = result["next_chapter"]
+    total_chapters = result["total_chapters"]
+    new_content = result["summary_content"]
 
     print()
     print("Current completed chapters:")

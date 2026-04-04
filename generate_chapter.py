@@ -8,6 +8,8 @@ Usage:
 """
 import argparse
 import glob
+import json
+import os
 import os
 import re
 import subprocess
@@ -31,7 +33,6 @@ from config import is_chapter_length_enforced
 from config import is_pacing_enabled
 from dual_llm import stream_llm
 from paths import (
-    CHAPTERS_DIR,
     CHAPTER_BEATS_TEMPLATE_PATH,
     CUMULATIVE_SUMMARY_PATH,
     STORY_BIBLE_PATH,
@@ -40,19 +41,25 @@ from paths import (
     chapter_draft_path,
     chapter_generation_log_path,
     ensure_runtime_dirs,
+    get_project_paths,
 )
+from summarize_chapter import summarize_chapter as run_summarize_chapter
 from story_utils import (
-    analyze_beats_document,
     build_initial_cumulative_summary,
+    finalize_beats_document,
     group_beats_into_blocks,
     has_summary_for_chapter,
     is_valid_beats_document,
     parse_beats,
+    sanitize_chapter_draft_document,
+    sanitize_cumulative_summary_document,
     split_story_bible_and_outline,
 )
 from text_quality import compression_ratio, max_ngram_repetition_ratio
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+STORY_BIBLE_PATH = None
+CUMULATIVE_SUMMARY_PATH = None
 CHAPTER_MIN_RATIO = 0.6
 CHAPTER_MAX_RATIO = 1.35
 META_NARRATION_PATTERNS = [
@@ -67,6 +74,14 @@ STRUCTURAL_LEAK_PATTERNS = [
     re.compile(r"(?mi)^###\s*notes\b"),
     re.compile(r"(?mi)^-\s+the chapter\b"),
 ]
+
+
+def _story_bible_path():
+    return STORY_BIBLE_PATH or get_project_paths().story_bible_path
+
+
+def _cumulative_summary_path():
+    return CUMULATIVE_SUMMARY_PATH or get_project_paths().cumulative_summary_path
 
 
 def parse_story_bible(content):
@@ -107,15 +122,19 @@ def prepare_system_prompt(system_prompt, story_bible_text, chapter=None):
 
 
 def ensure_cumulative_summary(story_bible_text):
-    if os.path.exists(CUMULATIVE_SUMMARY_PATH):
-        with open(CUMULATIVE_SUMMARY_PATH) as f:
-            return f.read()
+    summary_path = _cumulative_summary_path()
+    if os.path.exists(summary_path):
+        with open(summary_path) as f:
+            content = sanitize_cumulative_summary_document(f.read())
+        with open(summary_path, "w") as f:
+            f.write(content)
+        return content
 
     content = build_initial_cumulative_summary(
         get_total_chapters(story_bible_text),
         get_target_words_per_chapter(story_bible_text) * get_total_chapters(story_bible_text),
     )
-    with open(CUMULATIVE_SUMMARY_PATH, "w") as f:
+    with open(summary_path, "w") as f:
         f.write(content)
     return content
 
@@ -323,7 +342,7 @@ def generate_chapter(
     cleanup=False,
 ):
     ensure_runtime_dirs()
-    story_bible = STORY_BIBLE_PATH
+    story_bible = _story_bible_path()
     chapter_brief = chapter_beats_path(chapter)
     system_prompt_file = SYSTEM_PROMPT_PATH
 
@@ -525,15 +544,7 @@ def generate_chapter(
             )
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    metadata = (
-        f"# Chapter {chapter} Draft\n"
-        f"Generated: {timestamp}\n"
-        "Method: staged scene-block drafting\n"
-        f"Target: {target_words_total:,} words\n"
-        f"Actual: {len(chapter_text.split()):,} words\n\n"
-        "---\n\n"
-    )
-    full_draft = metadata + chapter_text
+    full_draft = sanitize_chapter_draft_document(chapter_text)
 
     if output_file:
         output_path = output_file if os.path.isabs(output_file) else os.path.abspath(output_file)
@@ -579,7 +590,7 @@ def generate_next_chapter_beats(chapter):
     if os.path.exists(next_beats):
         return None
 
-    with open(STORY_BIBLE_PATH) as f:
+    with open(_story_bible_path()) as f:
         story_bible_text = f.read()
     if next_chapter > get_total_chapters(story_bible_text):
         return None
@@ -607,25 +618,28 @@ def generate_next_chapter_beats(chapter):
             file=sys.stderr,
         )
         return None
-    issues = analyze_beats_document(content)
-    if issues:
-        repair_prompt = (
-            f"Rewrite this chapter brief so it is immediately usable for drafting.\n\n"
-            f"ISSUES TO FIX:\n" + "\n".join(f"- {issue}" for issue in issues) + "\n\n"
-            "REQUIREMENTS:\n"
-            "- Keep the same chapter intent and story events\n"
-            "- Output a single chapter brief only\n"
-            "- Use a chapter heading followed by 4-6 concrete beat sections\n"
-            "- Each beat must be specific, distinct, and prose-draftable\n"
-            "- Remove placeholders, vague filler, and duplicated beats\n\n"
-            f"CURRENT BRIEF:\n{content}"
-        )
-        content = stream_llm(
-            repair_prompt,
+    next_entry = find_chapter_entry(story_bible_text, next_chapter)
+    next_title = next_entry.title if next_entry else f"Chapter {next_chapter}"
+    result = finalize_beats_document(
+        content,
+        chapter_number=next_chapter,
+        chapter_title=next_title,
+        current_chapter_target_prompt=prompt,
+        llm_call=lambda user_prompt, system_prompt: stream_llm(
+            user_prompt,
             model=get_model("beats"),
-            system="You repair malformed chapter briefs into clean drafting plans.",
-        )
-        issues = analyze_beats_document(content)
+            system=system_prompt,
+        ),
+        repair_requirements=[
+            "Keep the same chapter intent and story events",
+            "Output a single chapter brief only",
+            "Use a chapter heading followed by 4-6 concrete beat sections",
+            "Each beat must be specific, distinct, and prose-draftable",
+            "Remove placeholders, vague filler, and duplicated beats",
+        ],
+    )
+    content = result["content"]
+    issues = result["issues"]
     if issues:
         print(
             "  ERROR: Generated chapter brief did not match expected quality: "
@@ -648,14 +662,24 @@ def generate_all_sequential(
     enforce_length=None,
     cleanup=False,
 ):
-    chapters_dir = CHAPTERS_DIR
+    runtime_paths = get_project_paths()
+    chapters_dir = runtime_paths.chapters_dir
     beats_files = sorted(
         glob.glob(os.path.join(chapters_dir, "chapter_*_beats.md")),
         key=lambda path: int(re.search(r"chapter_(\d+)_beats", path).group(1)),
     )
 
     if not beats_files:
-        print("No chapter beats found in chapters/. Run plan_chapters.py --beats first.")
+        print("No chapter briefs found in chapters/.")
+        if os.path.exists(runtime_paths.story_bible_path):
+            print("An existing story_bible.md was found for this project.")
+            print("Recovery options:")
+            print("  python3 repair_beats.py --force 1      # regenerate only Chapter 1 brief")
+            print("  python3 plan_chapters.py --regen-beats # regenerate briefs from the existing outline")
+            print("Then rerun: python3 generate_chapter.py --all")
+        else:
+            print("Start by creating a story bible and Chapter 1 brief:")
+            print('  python3 build_story_bible.py "your concept"')
         sys.exit(1)
 
     chapter_nums = []
@@ -668,13 +692,13 @@ def generate_all_sequential(
         print("Could not parse chapter numbers from beats filenames.")
         sys.exit(1)
 
-    with open(STORY_BIBLE_PATH) as f:
+    with open(_story_bible_path()) as f:
         story_bible_text = f.read()
     total_chapters = get_total_chapters(story_bible_text)
     min_chapter, max_chapter = min(chapter_nums), max(chapter_nums)
 
     # --- Auto-generate pacing weights if enabled and missing ---
-    pacing_file = os.path.join(os.path.dirname(STORY_BIBLE_PATH), "pacing_weights.json")
+    pacing_file = os.path.join(runtime_paths.project_dir, "pacing_weights.json")
     if is_pacing_enabled() and not os.path.exists(pacing_file) and total_chapters >= 2:
         from chapter_planning import parse_outline_entries
 
@@ -725,6 +749,16 @@ def generate_all_sequential(
 
         if os.path.exists(draft_path) and chapter_summarized and skip_existing:
             print(f"[{chapter}] Skipping chapter {chapter} — draft exists and is summarized")
+            # Still generate the next chapter brief so the loop can proceed
+            if chapter < total_chapters:
+                next_beats_path = chapter_beats_path(chapter + 1)
+                if os.path.exists(next_beats_path):
+                    print(f"  ✓ chapter_{chapter + 1:03d}_beats.md already exists")
+                else:
+                    print(f"  → Generating chapter_{chapter + 1:03d}_beats.md...")
+                    created = generate_next_chapter_beats(chapter)
+                    if created:
+                        print(f"  ✓ {os.path.basename(created)} written")
             chapter += 1
             continue
 
@@ -744,17 +778,11 @@ def generate_all_sequential(
             print(f"  ✓ {os.path.basename(path)} written ({word_count:,} words)")
 
         print(f"  → Summarizing chapter {chapter}...")
-        result = subprocess.run(
-            [sys.executable, os.path.join(script_dir, "summarize_chapter.py"), str(chapter), "--quiet"],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            print(f"  ✗ summarize_chapter.py FAILED (exit code {result.returncode})")
-            if result.stderr:
-                print(f"  stderr: {result.stderr.strip()[:500]}")
-            if result.stdout:
-                print(f"  stdout: {result.stdout.strip()[:500]}")
+        try:
+            run_summarize_chapter(chapter, quiet=True)
+        except (FileNotFoundError, ValueError) as exc:
+            print("  ✗ summarize_chapter.py FAILED")
+            print(f"  error: {str(exc).strip()[:500]}")
             print("  Stopping — fix the error above and rerun.")
             sys.exit(1)
         print(f"  ✓ chapter {chapter} summarized, cumulative_summary.md updated")
