@@ -3,18 +3,19 @@
 ## Story Bible — Static Reference Document
 
 > THIS FILE DOES NOT CHANGE after creation. All chapter prompts reference it as-is.
+> Keep this useful for drafting: prefer concrete specifics over vague literary commentary.
 
 ---
 
 ### 1. METADATA
 
 - **Title:** [STORY TITLE]
-- **Genre:** [GENRE - e.g. Contemporary Fiction / Heartwarming]
+- **Genre:** [GENRE - e.g. Erotic Romance / Erotic Thriller / Contemporary Erotic Drama]
 - **Target length:** [TARGET WORD COUNT] words
 - **Target chapters:** [NUMBER OF CHAPTERS]
 - **POV:** [POINT OF VIEW - e.g. Third Person Limited (follows CHARACTER_NAME)]
 - **Tense:** [Present/Past]
-- **Tone:** [OVERALL TONE - e.g. Gentle, inspiring, with moments of wonder and introspection]
+- **Tone:** [OVERALL TONE - e.g. Lush, tense, explicit, emotionally intimate]
 - **Audience:** [TARGET AUDIENCE]
 
 ---
@@ -41,7 +42,25 @@
 
 ---
 
-### 4. MAIN CHARACTERS
+### 4. EROTIC FRAMEWORK
+
+#### Core Dynamics
+[What erotic and relational dynamics drive the story? Who pursues, resists, seduces, controls, yields, obsesses, or hides? What emotional tensions power the intimate scenes?]
+
+#### Consent / Boundaries / Taboos
+- **Consent model:** [How consent is expressed or negotiated in this story]
+- **Hard boundaries:** [What must not happen]
+- **Soft boundaries / tensions:** [What characters resist, test, or fear]
+- **Taboo or transgressive elements:** [If relevant, define them clearly]
+
+#### Sexual Content Guidance
+- **What to emphasize:** [Specific acts, sensations, power dynamics, emotional states]
+- **What to avoid:** [Acts, tones, or styles that do not fit this story]
+- **Heat profile across the book:** [Slow burn / escalating / high heat from the start / uneven by design]
+
+---
+
+### 5. MAIN CHARACTERS
 
 #### [PROTAGONIST NAME]
 - **Role:** Protagonist
@@ -56,9 +75,11 @@
 
 - **Relationships:** [How do they relate to the other main characters? What is the history? What tensions exist?]
 
+- **Erotic profile:** [Desires, inhibitions, fantasies, fears, preferred dynamics, what arouses or destabilizes them]
+
 ---
 
-### 5. SUPPORTING CHARACTERS
+### 6. SUPPORTING CHARACTERS
 
 #### [SUPPORTING CHARACTER 1]
 - **Role:** [Supporting / Mentor / Antagonist / Love Interest]
@@ -73,34 +94,46 @@
 
 - **Relationships:** [Key relationships and how they shape the story]
 
----
-
-### 6. PROTAGONIST BACKSTORY
-
-[What happened to the protagonist BEFORE the story begins? What shaped them? What wounds or secrets do they carry? What do they want to escape, and what keeps pulling them back? Write 2-4 paragraphs of backstory that will inform the character's journey.]
+- **Erotic profile:** [If relevant, what role they play in the intimate or tension dynamics]
 
 ---
 
-### 7. ANTAGONIST / CENTRAL CONFLICT
+### 7. RELATIONSHIP MAP
 
-[The central tension of the story. This is NOT necessarily a villain — it is the primary force that opposes the protagonist's goals. It could be: a person, an institution, a personal weakness, a social condition, or an external circumstance. What does the protagonist want, what stands in their way, and what is at stake if they fail? Write 2-3 paragraphs.]
+- **Primary relationship arc:** [How the central relationship or core entanglement changes across the story]
+- **Secondary tensions:** [Jealousy, rivalry, secrecy, family pressure, social taboo, competing loyalties]
+- **Major turning points in intimacy:** [Key shifts in trust, attraction, power, vulnerability, or betrayal]
 
 ---
 
-### 8. THEMES
+### 8. PROTAGONIST BACKSTORY
+
+[Write a concise drafting-useful backstory. Focus on wounds, formative events, emotional baggage, and prior relationships that directly shape choices in this story. Prefer specifics over long biography.]
+
+---
+
+### 9. ANTAGONIST / CENTRAL CONFLICT
+
+[Define the primary force opposing the protagonist. This can be a person, institution, personal weakness, social condition, or circumstance. State clearly:
+- what the protagonist wants
+- what blocks them
+- what escalates the conflict
+- what is at stake if they fail]
+
+---
+
+### 10. THEMES
 
 - [Theme 1 - e.g. Finding authenticity in artistic expression]
 - [Theme 2 - e.g. The relationship between place and identity]
 - [Theme 3 - e.g. Community formation through shared purpose]
-- [Theme 4]
-- [Theme 5]
 
 ---
 
-### 9. TONE & VOICE GUIDELINES
+### 11. TONE & VOICE GUIDELINES
 
 #### Writing Style
-[How should the prose feel? Short and punchy or long and lyrical? What kinds of metaphors work? How does the narration reflect the protagonist's internal state? Give 2-3 paragraphs of voice guidance.]
+[How should the prose feel on the page? State preferred sentence rhythm, descriptive density, dialogue style, interiority level, and how explicit the narration should be in erotic scenes. Keep this operational and specific.]
 
 #### Tone
 [The overall emotional texture. What feelings should the reader experience? What is the balance — humor and tragedy, tension and release, intimacy and distance?]
@@ -113,14 +146,14 @@
 
 #### What to Emphasize
 - [Concrete sensory details the protagonist would notice]
-- [Growth through struggle, not through inspiration alone]i
-- [Specific sexual acts taking place]
+- [Growth through struggle, not through inspiration alone]
+- [Specific sexual acts and escalation patterns that fit the story]
 - [Dialogue that reveals character and advances plot simultaneously]
 - [Specific details that make this world feel real and lived-in]
 
 ---
 
-### 10. STRUCTURE OVERVIEW
+### 12. STRUCTURE OVERVIEW
 
 **Act 1 (Chapters 1-[X]): [Act 1 Name]**
 [What happens in the first act? What is the status quo, how is it disrupted, and what is the protagonist's initial response? What is the first major turning point? Be specific enough to identify chapter boundaries.]
@@ -133,7 +166,17 @@
 
 ---
 
-### 11. TIMELINE
+### 13. PACING & PRESSURE POINTS
+
+- **Early-book pressure:** [What hooks the reader and creates momentum in the first 3 chapters]
+- **Midpoint shift:** [What changes the story's direction or intensity]
+- **Late-book escalation:** [What makes the final act feel bigger, riskier, or more intimate]
+- **Where to slow down:** [Types of scenes that deserve expansion]
+- **Where to move quickly:** [Transitions or connective material that should stay compressed]
+
+---
+
+### 14. TIMELINE
 
 | Event | Description |
 |-------|-------------|
@@ -145,7 +188,7 @@
 
 ---
 
-### 12. KNOWN ENDING DIRECTION
+### 15. KNOWN ENDING DIRECTION
 
 [How does the story end? This is not a blow-by-blow summary but a description of the emotional and thematic resolution. Where are the main characters at the end? What has changed, and what remains unresolved? What is the final image or moment that closes the story? Write 2-3 paragraphs.]
 
